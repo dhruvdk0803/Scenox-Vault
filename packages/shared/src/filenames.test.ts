@@ -33,7 +33,7 @@ describe('sanitizeRelativePath', () => {
     ['a//b\\\\c', 'a/b/c'],
     ['', ''],
     [null, ''],
-  ])('%s → %s', (input, expected) => expect(sanitizeRelativePath(input as string)).toBe(expected));
+  ] as [string | null, string][])('%s → %s', (input, expected) => expect(sanitizeRelativePath(input)).toBe(expected));
 });
 
 describe('helpers', () => {
