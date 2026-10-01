@@ -108,7 +108,7 @@ export function OverallProgress({
 export function MobileProgressBar({ snapshot, onPauseAll, onResumeAll }: { snapshot: UploadSnapshot; onPauseAll: () => void; onResumeAll: () => void }) {
   const { stats } = snapshot;
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t border-border bg-surface/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-lg backdrop-blur sm:hidden">
+    <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 flex items-center gap-3 border-t border-border bg-surface/95 px-4 py-3 shadow-lg backdrop-blur sm:hidden">
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-baseline justify-between text-xs tabular-nums text-fg-muted">
           <span className="font-medium text-fg">{Math.floor(stats.percent)}%</span>

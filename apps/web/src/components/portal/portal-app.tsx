@@ -8,7 +8,7 @@ import { accessStore } from './branding';
 import { PasswordGate } from './password-gate';
 import { PortalShell } from './shell';
 import { DisabledState, ExpiredState, LoadErrorState, NotFoundState, PortalSkeleton } from './state-screens';
-import { Uploader } from './uploader';
+import { PortalDashboard } from './dashboard';
 
 type State =
   | { kind: 'loading' }
@@ -33,6 +33,18 @@ export function PortalApp({ token }: { token: string }) {
   }, [token]);
 
   React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  /** The stored access token stopped working: forget it and ask the server again (→ password screen). */
+  const onAccessLost = React.useCallback(() => {
+    accessStore.clear(token);
+    setState({ kind: 'loading' });
+    void load();
+  }, [token, load]);
+
+  const onReload = React.useCallback(() => {
+    setState({ kind: 'loading' });
     void load();
   }, [load]);
 
@@ -99,5 +111,15 @@ export function PortalApp({ token }: { token: string }) {
       </PortalShell>
     );
   }
-  return <Uploader token={token} portal={d.portal} uploadConfig={d.upload} branding={d.branding} />;
+  return (
+    <React.Suspense
+      fallback={
+        <PortalShell branding={d.branding}>
+          <PortalSkeleton />
+        </PortalShell>
+      }
+    >
+      <PortalDashboard token={token} portal={d.portal} uploadConfig={d.upload} branding={d.branding} onAccessLost={onAccessLost} onReload={onReload} />
+    </React.Suspense>
+  );
 }

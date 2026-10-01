@@ -39,6 +39,7 @@ export function brandStyle(primary: string | null | undefined): React.CSSPropert
 
 const ACCESS_KEY = (t: string) => `sv:portal-access:${t}`;
 const INTAKE_KEY = (t: string) => `sv:portal-intake:${t}`;
+const IDENTITY_KEY = (t: string) => `sv:portal-identity:${t}`;
 
 function read<T>(storage: 'local' | 'session', key: string): T | null {
   try {
@@ -89,6 +90,16 @@ export const EMPTY_INTAKE: IntakeValues = { name: '', email: '', company: '', me
 export const intakeStore = {
   load: (token: string) => read<IntakeValues>('session', INTAKE_KEY(token)),
   save: (token: string, v: IntakeValues) => write('session', INTAKE_KEY(token), v),
+};
+
+/** Who the client is when writing messages; remembered per portal on this device. */
+export interface Identity {
+  name: string;
+  email: string;
+}
+export const identityStore = {
+  load: (token: string) => read<Identity>('local', IDENTITY_KEY(token)),
+  save: (token: string, v: Identity) => write('local', IDENTITY_KEY(token), v),
 };
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;

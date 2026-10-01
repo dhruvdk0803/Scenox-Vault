@@ -1,19 +1,21 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, Plus, RotateCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FolderOpen, Plus, RotateCw } from 'lucide-react';
 import { formatBytes, formatNumber } from '@scenox/shared';
 import { Button, Card } from '@/components/ui';
 import type { UploadSnapshot } from '@/lib/upload';
 import { QueueList, type QueueActions } from './queue-list';
 
 export function CompleteScreen({
-  snapshot, actions, canUploadMore, onUploadMore, onRetryFailed,
+  snapshot, actions, canUploadMore, onUploadMore, onRetryFailed, onViewFiles,
 }: {
   snapshot: UploadSnapshot;
   actions: QueueActions;
   canUploadMore: boolean;
   onUploadMore: () => void;
   onRetryFailed: () => void;
+  /** Shown when the client is allowed to browse their files. */
+  onViewFiles?: () => void;
 }) {
   const { stats } = snapshot;
   const failed = stats.failedFiles;
@@ -48,8 +50,13 @@ export function CompleteScreen({
               <Plus aria-hidden /> Upload more files
             </Button>
           )}
+          {onViewFiles && (
+            <Button size="lg" variant="outline" onClick={onViewFiles}>
+              <FolderOpen aria-hidden /> View my files
+            </Button>
+          )}
         </div>
-        {failed === 0 && <p className="text-sm text-fg-subtle">You can close this window.</p>}
+        {failed === 0 && <p className="text-sm text-fg-subtle">All done. You can close this window or keep browsing.</p>}
       </Card>
       {failed > 0 && <QueueList items={snapshot.items} actions={actions} filter="failed" showTabs={false} maxHeight="320px" />}
     </div>

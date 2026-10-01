@@ -144,7 +144,7 @@ export function SelectionReview({ items, totalBytes, busy, error, resumeMatches 
 /** Sticky bottom action bar for phones. */
 export function MobileUploadBar({ label, busyLabel, disabled, onClick }: { label: string; busyLabel?: string | null; disabled?: boolean; onClick: () => void }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-lg backdrop-blur sm:hidden">
+    <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 border-t border-border bg-surface/95 px-4 py-3 shadow-lg backdrop-blur sm:hidden">
       <Button size="lg" className="h-12 w-full text-base" onClick={onClick} loading={!!busyLabel} disabled={disabled}>
         {busyLabel ?? label}
       </Button>

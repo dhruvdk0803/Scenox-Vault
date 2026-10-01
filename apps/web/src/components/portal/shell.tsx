@@ -7,18 +7,8 @@ import { LogoMark } from '@/components/brand/logo';
 import { Badge } from '@/components/ui';
 import { brandStyle, isHexColor } from './branding';
 
-export function PortalShell({
-  branding, logoUrl, children, wide, bottomInset,
-}: {
-  branding?: Branding | null;
-  logoUrl?: string | null;
-  children: React.ReactNode;
-  wide?: boolean;
-  /** Extra bottom padding (px-ish class) so a sticky mobile bar never covers content. */
-  bottomInset?: boolean;
-}) {
-  const primary = branding?.primaryColor;
-  // Dialogs render in a portal outside this wrapper, so mirror the brand colour on <html> too.
+/** Dialogs render in a portal outside the themed wrapper, so mirror the brand colour on <html> too. */
+export function useBrandOnRoot(primary: string | null | undefined) {
   React.useEffect(() => {
     if (!isHexColor(primary)) return;
     const root = document.documentElement;
@@ -35,29 +25,39 @@ export function PortalShell({
       }
     };
   }, [primary]);
+}
 
+/** Logo (or the default mark) that falls back gracefully if the image fails to load. */
+export function BrandLogo({ src, className }: { src: string | null | undefined; className?: string }) {
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => setFailed(false), [src]);
+  if (src && !failed) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={src} alt="" onError={() => setFailed(true)} className={className ?? 'h-8 max-w-[140px] rounded-sm object-contain'} />;
+  }
+  return <LogoMark className="size-8" />;
+}
+
+/** Minimal branded frame for the pre-dashboard screens (loading, password, expired, errors). */
+export function PortalShell({ branding, logoUrl, children }: { branding?: Branding | null; logoUrl?: string | null; children: React.ReactNode }) {
+  const primary = branding?.primaryColor;
+  useBrandOnRoot(primary);
   const logo = logoUrl ?? branding?.logoUrl ?? null;
-  const [logoFailed, setLogoFailed] = React.useState(false);
   return (
     <div style={brandStyle(primary)} className="flex min-h-dvh flex-col bg-background">
       <header className="border-b border-border bg-surface/80 backdrop-blur supports-[backdrop-filter]:bg-surface/70">
-        <div className={`mx-auto flex h-16 items-center justify-between gap-3 px-4 sm:px-6 ${wide ? 'max-w-5xl' : 'max-w-3xl'}`}>
+        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            {logo && !logoFailed ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={logo} alt="" onError={() => setLogoFailed(true)} className="h-8 max-w-[140px] rounded-sm object-contain" />
-            ) : (
-              <LogoMark className="size-8" />
-            )}
+            <BrandLogo src={logo} />
             {branding?.companyName && <span className="truncate text-[15px] font-semibold tracking-tight text-fg">{branding.companyName}</span>}
           </div>
           <Badge tone="neutral" className="shrink-0 gap-1.5 py-1 pl-2 pr-2.5">
             <Lock aria-hidden className="size-3" />
-            Secure upload
+            Secure portal
           </Badge>
         </div>
       </header>
-      <main className={`mx-auto w-full flex-1 px-4 py-8 sm:px-6 sm:py-12 ${wide ? 'max-w-5xl' : 'max-w-3xl'} ${bottomInset ? 'pb-32 sm:pb-12' : ''}`}>{children}</main>
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-12">{children}</main>
       <footer className="px-4 pb-8 text-center text-xs text-fg-subtle">
         Files are sent over an encrypted connection and delivered directly to {branding?.companyName ?? 'the recipient'}.
       </footer>

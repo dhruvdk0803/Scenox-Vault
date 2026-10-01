@@ -2,30 +2,18 @@
 
 import * as React from 'react';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
-import { formatBytes, formatNumber, type PublicPortalDTO, type StartSessionRequest, type UploadEngineConfig } from '@scenox/shared';
-import { Button } from '@/components/ui';
+import { formatNumber, type PublicPortalDTO, type StartSessionRequest, type UploadEngineConfig } from '@scenox/shared';
 import { ApiClientError } from '@/lib/api';
 import {
-  ensureSession, getDefaultKV, makeClientKey, makeFingerprint, portalApi, preflightAll, QueueStore, scanDataTransfer, summarizePending,
-  useUploadManager, validateStoredSession, type AddInput, type PendingRecord, type PickedFile, type StoredSession,
+  ensureSession, getDefaultKV, makeClientKey, makeFingerprint, portalApi, preflightAll, QueueStore, scanDataTransfer,
+  useUploadManager, type AddInput, type PendingRecord, type PickedFile, type StoredSession,
 } from '@/lib/upload';
 import { accessStore, EMPTY_INTAKE, intakeStore, type IntakeValues } from './branding';
-import { CompleteScreen } from './complete-screen';
-import { ConnectionBanner } from './connection-banner';
-import { DragOverlay, Dropzone, HiddenPickers, useWindowDrop, type DropzoneHandle } from './dropzone';
-import { IntakeForm, needsIntake } from './intake-form';
-import { PortalIntro } from './intro';
-import { PreflightDialog, reasonText, type DuplicateChoice, type PreflightPlan } from './preflight-dialog';
-import { QueueList, type QueueActions } from './queue-list';
-import { ResumeCard } from './resume-card';
-import { MobileUploadBar, SelectionReview } from './selection-review';
-import { UploadedFiles } from './uploaded-files';
-import { MobileProgressBar, OverallProgress } from './upload-progress';
-import { usePageGuards } from './use-page-guards';
+import { useWindowDrop, type DropzoneHandle } from './dropzone';
+import { needsIntake } from './intake-form';
+import { reasonText, type DuplicateChoice, type PreflightPlan } from './preflight-dialog';
+import type { QueueActions } from './queue-list';
 import { useSelection } from './use-selection';
-import { PortalShell } from './shell';
-import type { Branding } from '@scenox/shared';
 
 type Portal = NonNullable<PublicPortalDTO['portal']>;
 
@@ -38,7 +26,7 @@ interface Candidate {
 interface Keyed extends Candidate {
   clientKey: string;
 }
-interface PlanState {
+export interface PlanState {
   accepted: Keyed[];
   duplicates: Keyed[];
   rejected: { c: Keyed; reason: string }[];
@@ -54,7 +42,31 @@ const toPayload = (v: IntakeValues | null): Omit<StartSessionRequest, 'totalFile
   return out;
 };
 
-export function Uploader({ token, portal, uploadConfig, branding }: { token: string; portal: Portal; uploadConfig?: UploadEngineConfig; branding: Branding }) {
+export function toDialogPlan(p: PlanState): PreflightPlan {
+  return {
+    accepted: p.accepted.length,
+    acceptedBytes: p.accepted.reduce((n, c) => n + c.file.size, 0),
+    rejected: p.rejected.map((r) => ({ name: r.c.name, relativePath: r.c.relativePath, reason: r.reason })),
+    duplicates: p.duplicates.length,
+    duplicateBytes: p.duplicates.reduce((n, c) => n + c.file.size, 0),
+  };
+}
+
+export interface UploadControllerOptions {
+  token: string;
+  portal: Portal;
+  uploadConfig?: UploadEngineConfig;
+  /** Called after the queue drained and the server was told (dashboard/browse/uploads should refresh). */
+  onRunComplete: () => void;
+  /** Called when files are dropped anywhere on the window (so the shell can switch to the Upload tab). */
+  onWindowDrop: () => void;
+}
+
+/**
+ * Everything the upload flow needs, hoisted out of the Upload tab so the engine keeps running while the
+ * client browses other tabs. Behaviour is unchanged from the original single-page uploader.
+ */
+export function useUploadController({ token, portal, uploadConfig, onRunComplete, onWindowDrop }: UploadControllerOptions) {
   const kv = getDefaultKV();
   const queue = React.useMemo(() => new QueueStore(kv, token), [kv, token]);
   const [intake, setIntake] = React.useState<IntakeValues | null>(() => (needsIntake(portal) ? intakeStore.load(token) : EMPTY_INTAKE));
@@ -80,27 +92,14 @@ export function Uploader({ token, portal, uploadConfig, branding }: { token: str
   const selection = useSelection();
   const pickers = React.useRef<DropzoneHandle>(null);
   const addMore = React.useRef<DropzoneHandle>(null);
-  const [session, setSession] = React.useState<StoredSession | null>(null);
   const [pending, setPending] = React.useState<PendingRecord[]>([]);
   const [prep, setPrep] = React.useState<{ label: string } | null>(null);
   const [prepError, setPrepError] = React.useState<string | null>(null);
   const [plan, setPlan] = React.useState<PlanState | null>(null);
-  const [filesRefresh, setFilesRefresh] = React.useState(0);
 
   const hasWork = snapshot.items.length > 0;
   const view: 'select' | 'uploading' | 'complete' = !hasWork ? 'select' : snapshot.stats.finished ? 'complete' : 'uploading';
   const needsIntakeStep = needsIntake(portal) && !intake;
-
-  usePageGuards(snapshot.stats.running);
-
-  /* previously stored session (for "Your uploaded files") */
-  React.useEffect(() => {
-    let live = true;
-    void validateStoredSession(kv, portalApi, token).then((s) => live && s && setSession(s));
-    return () => {
-      live = false;
-    };
-  }, [kv, token]);
 
   /* unfinished uploads from an earlier visit */
   React.useEffect(() => {
@@ -112,8 +111,10 @@ export function Uploader({ token, portal, uploadConfig, branding }: { token: str
     };
   }, [queue, portal.allowResume, view]);
 
-  /* queue drained → tell the server once per run */
+  /* queue drained → tell the server once per run, then refresh the dashboard data */
   const completedRun = React.useRef(0);
+  const onRunCompleteRef = React.useRef(onRunComplete);
+  onRunCompleteRef.current = onRunComplete;
   React.useEffect(() => {
     const { stats, runId } = snapshot;
     if (!stats.finished || runId === completedRun.current) return;
@@ -124,9 +125,13 @@ export function Uploader({ token, portal, uploadConfig, branding }: { token: str
     }
     const s = manager.getSession();
     if (s) {
-      void portalApi.complete(token, s.sessionToken, { filesUploaded: stats.completedFiles, bytesUploaded: stats.completedBytes, filesFailed: stats.failedFiles }).catch(() => undefined);
+      void portalApi
+        .complete(token, s.sessionToken, { filesUploaded: stats.completedFiles, bytesUploaded: stats.completedBytes, filesFailed: stats.failedFiles })
+        .catch(() => undefined)
+        .finally(() => onRunCompleteRef.current());
+    } else {
+      onRunCompleteRef.current();
     }
-    setFilesRefresh((k) => k + 1);
   }, [snapshot, manager, token]);
 
   /* ───────── submit: session → preflight → (dialog) → queue ───────── */
@@ -173,7 +178,6 @@ export function Uploader({ token, portal, uploadConfig, branding }: { token: str
             pre = await run(sess);
           } else throw e;
         }
-        setSession(sess);
         manager.setSession({ sessionId: sess.sessionId, sessionToken: sess.sessionToken });
 
         const byKey = new Map(pre.results.map((r) => [r.clientKey, r]));
@@ -216,12 +220,13 @@ export function Uploader({ token, portal, uploadConfig, branding }: { token: str
 
   const onDrop = React.useCallback(
     async (dt: DataTransfer) => {
+      onWindowDrop();
       if (!hasWork) return void selection.scanDrop(dt);
       const acc: PickedFile[] = [];
       await scanDataTransfer(dt, { onFiles: (f) => acc.push(...f) });
       if (acc.length) void prepare(acc, false);
     },
-    [hasWork, prepare, selection],
+    [hasWork, prepare, selection, onWindowDrop],
   );
 
   const dragging = useWindowDrop(!needsIntakeStep && view !== 'complete' && !prep && !plan, (dt) => void onDrop(dt));
@@ -234,10 +239,10 @@ export function Uploader({ token, portal, uploadConfig, branding }: { token: str
     try {
       const s = await ensureSession({ kv, api: portalApi, portalToken: token, accessToken: accessToken(), intake: toPayload(intakeRef.current), totals: { totalFiles: snapshot.stats.failedFiles, totalBytes: 0 } });
       manager.setSession({ sessionId: s.sessionId, sessionToken: s.sessionToken });
-      setSession(s);
     } catch {
       /* the retry itself will surface the problem */
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kv, manager, snapshot.stats.finished, snapshot.stats.failedFiles, token]);
 
   const actions = React.useMemo<QueueActions>(
@@ -256,133 +261,12 @@ export function Uploader({ token, portal, uploadConfig, branding }: { token: str
     return selection.items.reduce((n, i) => n + (fp.has(makeFingerprint({ portalToken: token, relativePath: i.relativePath, name: i.name, size: i.size, lastModified: i.lastModified })) ? 1 : 0), 0);
   }, [pending, selection.items, token]);
 
-  /* ───────── render ───────── */
-
-  const sticky = (view === 'select' && selection.items.length > 0) || view === 'uploading';
-  const dropzone = (
-    <Dropzone
-      ref={pickers} allowFolders={portal.allowFolders} onPick={onPicked} scanning={selection.scan} onCancelScan={selection.cancelScan}
-      maxFileSizeBytes={portal.maxFileSizeBytes} allowedExtensions={portal.allowedExtensions}
-    />
-  );
-
-  let body: React.ReactNode;
-  if (needsIntakeStep) {
-    body = (
-      <IntakeForm
-        requirements={portal} initial={intake}
-        onSubmit={(v) => {
-          intakeStore.save(token, v);
-          setIntake(v);
-        }}
-      />
-    );
-  } else if (view === 'uploading') {
-    body = (
-      <div className="flex flex-col gap-4">
-        <ConnectionBanner offline={snapshot.offline} sessionExpired={snapshot.sessionExpired} />
-        <OverallProgress
-          snapshot={snapshot} onPauseAll={() => manager.pauseAll()} onResumeAll={() => manager.resumeAll()}
-          onCancelAll={() => manager.cancelAll()} onAddMore={() => addMore.current?.openFiles()}
-        />
-        {prep && (
-          <p className="flex items-center gap-2 text-sm text-fg-muted" role="status">
-            <Loader2 aria-hidden className="size-4 animate-spin" /> {prep.label}
-          </p>
-        )}
-        {prepError && <p role="alert" className="text-sm text-danger">{prepError}</p>}
-        <QueueList items={snapshot.items} actions={actions} />
-        <p className="text-center text-xs text-fg-subtle">Keep this tab open until the upload finishes. It’s safe to switch to other apps.</p>
-      </div>
-    );
-  } else if (view === 'complete') {
-    body = (
-      <div className="flex flex-col gap-8">
-        <ConnectionBanner offline={snapshot.offline} sessionExpired={snapshot.sessionExpired} />
-        <CompleteScreen
-          snapshot={snapshot} actions={actions} canUploadMore={portal.allowMultipleSessions}
-          onRetryFailed={() => void reopenSession().then(() => manager.retryFailed())}
-          onUploadMore={() => {
-            manager.reset();
-            selection.clear();
-          }}
-        />
-        {portal.allowClientViewFiles && session && <UploadedFiles token={token} sessionToken={session.sessionToken} canDelete={portal.allowClientDeleteFiles} refreshKey={filesRefresh} />}
-      </div>
-    );
-  } else {
-    body = (
-      <div className="flex flex-col gap-8">
-        <div className="flex flex-col gap-4">
-          {pending.length > 0 && selection.items.length === 0 && !selection.scan && (
-            <ResumeCard
-              {...summarizePending(pending)}
-              onResume={() => (pending.some((p) => p.relativePath) && portal.allowFolders ? pickers.current?.openFolder() : pickers.current?.openFiles())}
-              onDiscard={() => void queue.clear().then(() => setPending([]))}
-            />
-          )}
-          {selection.items.length === 0 ? (
-            dropzone
-          ) : (
-            <>
-              {selection.scan && (
-                <p className="flex items-center gap-2 text-sm text-fg-muted" role="status">
-                  <Loader2 aria-hidden className="size-4 animate-spin" /> Scanning folder… <span className="tabular-nums">{formatNumber(selection.scan.found)}</span> files
-                  <Button variant="link" size="sm" onClick={selection.cancelScan} className="ml-1">Stop</Button>
-                </p>
-              )}
-              <SelectionReview
-                items={selection.items} totalBytes={selection.totalBytes} busy={prep} error={prepError} resumeMatches={resumeMatches}
-                onRemove={(id) => selection.removeIds(new Set([id]))} onRemoveFolder={selection.removeFolder} onClear={selection.clear}
-                onAddMore={() => pickers.current?.openFiles()} onUpload={uploadSelection}
-              />
-              {/* keep the inputs mounted for "Add more" */}
-              <HiddenPickers ref={pickers} allowFolders={portal.allowFolders} onPick={onPicked} />
-            </>
-          )}
-        </div>
-        {portal.allowClientViewFiles && session && selection.items.length === 0 && (
-          <UploadedFiles token={token} sessionToken={session.sessionToken} canDelete={portal.allowClientDeleteFiles} refreshKey={filesRefresh} />
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <PortalShell branding={branding} logoUrl={portal.logoUrl} bottomInset={sticky}>
-      <div className="flex flex-col gap-8">
-        <PortalIntro portal={portal} compact={view !== 'select' && !needsIntakeStep} />
-        {body}
-      </div>
-      <HiddenPickers ref={addMore} allowFolders={false} onPick={onPicked} />
-      <DragOverlay visible={dragging} />
-      <PreflightDialog
-        plan={plan ? toDialogPlan(plan) : null}
-        onCancel={() => {
-          if (plan?.fromSelection) selection.removeIds(new Set(plan.rejected.map((r) => r.c.selId!).filter((x) => x !== undefined)));
-          setPlan(null);
-        }}
-        onConfirm={(choice) => {
-          if (!plan) return;
-          commit(plan.accepted, plan.duplicates, choice, plan.fromSelection);
-          setPlan(null);
-        }}
-      />
-      {view === 'select' && selection.items.length > 0 && !needsIntakeStep && (
-        <MobileUploadBar label={`Upload ${formatBytes(selection.totalBytes)}`} busyLabel={prep?.label} onClick={uploadSelection} />
-      )}
-      {view === 'uploading' && <MobileProgressBar snapshot={snapshot} onPauseAll={() => manager.pauseAll()} onResumeAll={() => manager.resumeAll()} />}
-    </PortalShell>
-  );
-}
-
-function toDialogPlan(p: PlanState): PreflightPlan {
   return {
-    accepted: p.accepted.length,
-    acceptedBytes: p.accepted.reduce((n, c) => n + c.file.size, 0),
-    rejected: p.rejected.map((r) => ({ name: r.c.name, relativePath: r.c.relativePath, reason: r.reason })),
-    duplicates: p.duplicates.length,
-    duplicateBytes: p.duplicates.reduce((n, c) => n + c.file.size, 0),
+    manager, snapshot, selection, pickers, addMore, queue,
+    intake, saveIntake: (v: IntakeValues) => { intakeStore.save(token, v); setIntake(v); }, needsIntakeStep,
+    pending, setPending, prep, prepError, plan, setPlan, view, dragging, actions, resumeMatches,
+    uploadSelection, onPicked, commit, reopenSession,
   };
 }
 
+export type UploadController = ReturnType<typeof useUploadController>;
