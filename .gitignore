@@ -14,3 +14,4 @@ data/
 test-results/
 playwright-report/
 dump.rdb
+scenox-vault-*.tar.gz
