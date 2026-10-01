@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyError, type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { config } from './config';
 import { AppError } from './lib/errors';
@@ -23,10 +23,10 @@ import tusRoutes from './routes/tus';
 import uploadRoutes from './routes/uploads';
 import userRoutes from './routes/users';
 
-export async function buildApp() {
+export async function buildApp(): Promise<FastifyInstance> {
   const cfg = config();
   const app = Fastify({
-    loggerInstance: logger,
+    loggerInstance: logger as unknown as FastifyBaseLogger,
     trustProxy: (_addr: string, hop: number) => hop < cfg.trustProxy,
     // JSON bodies are small; upload bytes go through tus which bypasses body parsing entirely.
     bodyLimit: 2 * 1024 * 1024,

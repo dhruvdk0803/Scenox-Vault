@@ -46,3 +46,24 @@ export const UPLOAD_DEFAULTS = {
   /** Exponential backoff schedule in ms; the final entry repeats. */
   retryDelays: [500, 1000, 2000, 4000, 8000, 16000],
 };
+
+/** Extension → category buckets used for filtering and analytics. */
+export const FILE_TYPE_CATEGORIES = {
+  image: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif', 'bmp', 'tif', 'tiff', 'svg', 'raw', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'psd', 'ai', 'eps'],
+  video: ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'wmv', 'flv', 'mpg', 'mpeg', 'mxf', 'prores', 'r3d', 'braw'],
+  audio: ['mp3', 'wav', 'aac', 'flac', 'm4a', 'ogg', 'aiff', 'aif', 'wma', 'opus'],
+  document: ['pdf', 'doc', 'docx', 'rtf', 'txt', 'md', 'odt', 'pages', 'ppt', 'pptx', 'key', 'odp', 'html', 'json', 'xml'],
+  spreadsheet: ['xls', 'xlsx', 'xlsm', 'csv', 'tsv', 'ods', 'numbers'],
+  archive: ['zip', '7z', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'zst', 'dmg', 'iso'],
+} as const;
+export type FileTypeCategory = keyof typeof FILE_TYPE_CATEGORIES | 'other';
+
+export const ARCHIVE_EXTENSIONS: readonly string[] = FILE_TYPE_CATEGORIES.archive;
+
+export function fileCategory(extension: string): FileTypeCategory {
+  const ext = extension.toLowerCase();
+  for (const [cat, exts] of Object.entries(FILE_TYPE_CATEGORIES)) {
+    if ((exts as readonly string[]).includes(ext)) return cat as FileTypeCategory;
+  }
+  return 'other';
+}
