@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getDb } from '../src/db';
-import { activityLogs, clients, portalAccessTokens, portals, settings, uploadSessions } from '../src/db/schema';
+import { activityLogs, clients, files, portalAccessTokens, portals, settings, uploadSessions } from '../src/db/schema';
 import { hashToken } from '../src/lib/crypto';
 import { closeQueues } from '../src/queue';
 import { getStorage } from '../src/storage';
@@ -250,7 +250,7 @@ describe('POST /preflight', () => {
 });
 
 describe('client file view / delete', () => {
-  it('lists only this session\'s files when allowed, and deletes them with counters + activity', async () => {
+  it('lists only this session\'s files when allowed, and deletes any file of this portal (never another portal\'s) with counters + activity', async () => {
     const { client, portal, token } = await seedPortal({ portal: { allowClientViewFiles: true, allowClientDeleteFiles: true } });
     const { body } = await startSession(app, token, { name: 'Jane' });
     const mine = await seedReadyFile(portal, { id: body.sessionId }, { name: 'mine.txt' });
@@ -263,17 +263,23 @@ describe('client file view / delete', () => {
     expect(list.json().map((f: { name: string }) => f.name)).toEqual(['mine.txt']);
     expect(Object.keys(list.json()[0]).sort()).toEqual(['id', 'name', 'relativePath', 'size', 'status', 'uploadedAt']);
 
-    expect((await app.inject({ method: 'DELETE', url: `/api/public/portals/${token}/files/${theirs.file.id}`, headers: hdr })).statusCode).toBe(404);
+    const other = await seedPortal({ portal: { allowClientDeleteFiles: true } });
+    const foreign = await seedReadyFile(other.portal, await seedSession(other.portal), { name: 'foreign.txt' });
+    expect((await app.inject({ method: 'DELETE', url: `/api/public/portals/${token}/files/${foreign.file.id}`, headers: hdr })).statusCode).toBe(404);
+    expect((await getDb().select().from(files).where(eq(files.id, foreign.file.id)))).toHaveLength(1);
     const del = await app.inject({ method: 'DELETE', url: `/api/public/portals/${token}/files/${mine.file.id}`, headers: hdr });
     expect(del.statusCode).toBe(204);
     const [c] = await getDb().select().from(clients).where(eq(clients.id, client.id));
     expect(c!.fileCount).toBe(1); // only "theirs" remains
-    expect((await getDb().select().from(activityLogs).where(eq(activityLogs.action, 'file.deleted_by_client')))).toHaveLength(1);
+    // another session's file of the same portal can be deleted too, without any upload-session header
+    expect((await app.inject({ method: 'DELETE', url: `/api/public/portals/${token}/files/${theirs.file.id}` })).statusCode).toBe(204);
+    expect((await getDb().select().from(clients).where(eq(clients.id, client.id)))[0]!.fileCount).toBe(0);
+    expect((await getDb().select().from(activityLogs).where(eq(activityLogs.action, 'file.deleted_by_client')))).toHaveLength(2);
     await expect(getStorage().exists(mine.key)).resolves.toBe(false);
   });
 
   it('is forbidden when the portal does not allow it', async () => {
-    const { token } = await seedPortal();
+    const { token } = await seedPortal({ portal: { allowClientViewFiles: false } });
     const { body } = await startSession(app, token);
     const hdr = { 'x-upload-session': body.sessionToken };
     expect((await get(token, hdr, '/files')).statusCode).toBe(403);

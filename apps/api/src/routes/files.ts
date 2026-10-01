@@ -9,6 +9,7 @@ import { getStorage } from '../storage';
 import { browseFiles, browseQuerySchema, fileListQuerySchema, currentStorageKey, deleteFiles, getFileDTO, getFileRow, listFiles, moveFiles, renameFile } from '../services/files';
 import { createExport, getExport, listExportsForUser, MAX_EXPORT_FILES } from '../services/exports';
 import { toExportDTO } from '../services/mappers';
+import { listFileComments, messageListQuerySchema } from '../services/messages';
 
 const idParam = z.object({ id: z.uuid() });
 const idsBody = (max: number) => z.object({ fileIds: z.array(z.uuid()).min(1, 'Select at least one file.').max(max, `Please select at most ${max} files at a time.`) });
@@ -69,6 +70,12 @@ export default async function filesRoutes(app: FastifyInstance) {
   });
 
   app.get('/files/:id', perm('files.view'), async (req) => getFileDTO(parse(idParam, req.params).id));
+
+  app.get('/files/:id/comments', perm('files.view'), async (req) => {
+    const { id } = parse(idParam, req.params);
+    const { before, limit } = parse(messageListQuerySchema.omit({ fileId: true }), req.query);
+    return listFileComments(id, { before, limit });
+  });
 
   app.patch('/files/:id', perm('files.manage'), async (req) => {
     const { id } = parse(idParam, req.params);

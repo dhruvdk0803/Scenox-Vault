@@ -1,4 +1,5 @@
 import {
+  UPLOAD_SESSION_HEADER,
   sanitizeFilename,
   sanitizeRelativePath,
   type CompleteSessionRequest,
@@ -7,7 +8,7 @@ import {
   type PublicFileDTO,
   type StartSessionRequest,
 } from '@scenox/shared';
-import { and, eq, inArray, asc, sql } from 'drizzle-orm';
+import { and, eq, inArray, asc, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config';
@@ -17,7 +18,17 @@ import { clientActivity } from '../lib/activity';
 import { AppError, forbidden, notFound, validationError } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { enqueue } from '../queue';
+import { browseClientFiles, buildClientDashboard, clientBrowseQuerySchema, listClientUploads, loadUsablePortal } from '../services/client-portal';
 import { deleteFiles } from '../services/files';
+import {
+  createClientMessage,
+  getMessageDTO,
+  listThread,
+  markStaffMessagesRead,
+  messageListQuerySchema,
+  notifyTeamOfClientMessage,
+  postClientMessageSchema,
+} from '../services/messages';
 import {
   buildPublicPortalDTO,
   openStoredImage,
@@ -29,7 +40,7 @@ import {
 } from '../services/public-portal';
 import { getQuota, quotaMessage } from '../services/quota';
 import { getBranding, getSettings } from '../services/settings';
-import { assertPortalUsable, checkFileRules, getUploadRules, hasPortalAccess, loadPortalByToken, requireUploadSession } from '../services/uploads';
+import { assertPortalUsable, authenticateUploadToken, checkFileRules, getUploadRules, hasPortalAccess, loadPortalByToken, requireUploadSession } from '../services/uploads';
 
 const MAX_PREFLIGHT_FILES = 5000;
 
@@ -234,14 +245,25 @@ export default async function publicRoutes(app: FastifyInstance) {
 
   app.delete('/portals/:token/files/:fileId', async (req, reply) => {
     const params = parse(z.object({ token: z.string().max(200), fileId: z.string().max(64) }), req.params);
-    const { portal } = await loadPortalByToken(params.token);
-    const { session, portal: p, client } = await requireUploadSession(req, portal, { statuses: ['active', 'completed'] });
+    const { portal: p, client } = await loadUsablePortal(req, params.token);
     if (!p.allowClientDeleteFiles) throw forbidden('Deleting files is not enabled for this upload link.');
     if (!z.uuid().safeParse(params.fileId).success) throw notFound('File not found.');
+
+    // The upload-session header is optional now; when it is valid it still names the actor and keeps
+    // the previous behaviour of being able to remove any file of the visitor's own session.
+    const header = req.headers[UPLOAD_SESSION_HEADER];
+    const session = typeof header === 'string' ? await authenticateUploadToken(header, { portalId: p.id, touch: false, skipPortalState: true }).catch(() => null) : null;
+
     const [f] = await getDb()
       .select()
       .from(files)
-      .where(and(eq(files.id, params.fileId), eq(files.uploadSessionId, session.id)))
+      .where(
+        and(
+          eq(files.id, params.fileId),
+          eq(files.portalId, p.id),
+          session ? or(inArray(files.status, ['ready', 'processing']), eq(files.uploadSessionId, session.session.id)) : inArray(files.status, ['ready', 'processing']),
+        ),
+      )
       .limit(1);
     if (!f) throw notFound('File not found.');
     const deleted = await deleteFiles([f.id]);
@@ -252,10 +274,66 @@ export default async function publicRoutes(app: FastifyInstance) {
         resourceId: f.id,
         clientId: client.id,
         portalId: p.id,
-        actorLabel: session.uploaderName ?? undefined,
+        actorLabel: session?.session.uploaderName ?? client.name,
         metadata: { filename: f.originalFilename, size: Number(f.size) },
       });
     }
     return reply.code(204).send();
+  });
+
+  // ───────────── client dashboard (no upload session needed) ─────────────
+  app.get('/portals/:token/dashboard', limit(120), async (req) => {
+    const { token } = parse(tokenParam, req.params);
+    const { portal, client } = await loadUsablePortal(req, token);
+    return buildClientDashboard(portal, client);
+  });
+
+  app.get('/portals/:token/browse', limit(240), async (req) => {
+    const { token } = parse(tokenParam, req.params);
+    const query = parse(clientBrowseQuerySchema, req.query);
+    const { portal } = await loadUsablePortal(req, token);
+    if (!portal.allowClientViewFiles) throw new AppError(403, 'files_hidden', 'Viewing uploaded files is not enabled for this upload link.');
+    return browseClientFiles(portal, query);
+  });
+
+  app.get('/portals/:token/uploads', limit(120), async (req) => {
+    const { token } = parse(tokenParam, req.params);
+    const { portal } = await loadUsablePortal(req, token);
+    if (!portal.allowClientViewFiles) throw new AppError(403, 'files_hidden', 'Viewing uploaded files is not enabled for this upload link.');
+    return listClientUploads(portal);
+  });
+
+  // ───────────── messages ─────────────
+  const requireMessages = (portal: { allowClientMessages: boolean }) => {
+    if (!portal.allowClientMessages) throw new AppError(403, 'messages_disabled', 'Messaging is not enabled for this upload link.');
+  };
+
+  app.get('/portals/:token/messages', limit(240), async (req) => {
+    const { token } = parse(tokenParam, req.params);
+    const query = parse(messageListQuerySchema, req.query);
+    const { portal } = await loadUsablePortal(req, token);
+    requireMessages(portal);
+    const res = await listThread(portal.id, query, true);
+    await markStaffMessagesRead(portal.id, query.fileId); // the visitor has now seen the staff replies of this thread
+    return res;
+  });
+
+  app.post('/portals/:token/messages', limit(20), async (req, reply) => {
+    const { token } = parse(tokenParam, req.params);
+    const body = parse(postClientMessageSchema, req.body ?? {});
+    const { portal, client } = await loadUsablePortal(req, token);
+    requireMessages(portal);
+    const created = await createClientMessage(portal, body);
+    await clientActivity(req, {
+      action: 'message.posted',
+      resourceType: 'message',
+      resourceId: created.id,
+      clientId: client.id,
+      portalId: portal.id,
+      actorLabel: created.authorName,
+      metadata: { ...(body.fileId ? { fileId: body.fileId } : {}), length: body.body.length },
+    });
+    await notifyTeamOfClientMessage(portal, client, { authorName: created.authorName, body: body.body, fileName: created.fileName });
+    return reply.code(201).send(await getMessageDTO(created.id, true));
   });
 }

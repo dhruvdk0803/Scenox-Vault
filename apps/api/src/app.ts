@@ -16,6 +16,7 @@ import clientRoutes from './routes/clients';
 import dashboardRoutes from './routes/dashboard';
 import fileRoutes from './routes/files';
 import healthRoutes from './routes/health';
+import messageRoutes from './routes/messages';
 import portalRoutes from './routes/portals';
 import publicRoutes from './routes/public';
 import settingsRoutes from './routes/settings';
@@ -104,6 +105,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(userRoutes, { prefix: '/users' });
       await api.register(clientRoutes, { prefix: '/clients' });
       await api.register(portalRoutes, { prefix: '/portals' });
+      await api.register(messageRoutes, { prefix: '/messages' });
       await api.register(uploadRoutes, { prefix: '/uploads' });
       await api.register(fileRoutes); // /files/*, /exports/*
       await api.register(activityRoutes); // /activity, /audit, /notifications

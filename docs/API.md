@@ -123,7 +123,7 @@ All paths are relative to `/api/public/portals/:token`. A wrong or revoked token
 | POST | `/preflight` | `x-upload-session` | `PreflightRequest` → `PreflightResponse` (type/size/quota checks + duplicate detection) |
 | POST | `/sessions/complete` | `x-upload-session` | `CompleteSessionRequest` → 204; triggers notifications |
 | GET | `/files` | `x-upload-session` | portal must allow client view → `PublicFileDTO[]` (this session's/portal's files) |
-| DELETE | `/files/:fileId` | `x-upload-session` | portal must allow client delete; only files from this session |
+| DELETE | `/files/:fileId` | `x-upload-session?` | portal must allow client delete; any file of this portal (the session header is optional) |
 
 ## Client dashboard (public)
 

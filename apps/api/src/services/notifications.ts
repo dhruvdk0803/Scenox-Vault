@@ -76,6 +76,8 @@ const CTA_LABEL: Record<string, string> = {
   file_quarantined: 'Review file',
   disk_warning: 'Open Vault',
   disk_critical: 'Open Vault',
+  client_message: 'View message',
+  staff_reply: 'Open portal',
 };
 
 const safeColor = (c: string) => (/^#[0-9a-f]{3,8}$/i.test(c) ? c : '#4F46E5');

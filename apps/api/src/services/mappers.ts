@@ -1,5 +1,5 @@
-import type { ActivityDTO, ClientDTO, ExportJobDTO, FileDTO, NotificationDTO, PortalDTO, UploadSessionDTO } from '@scenox/shared';
-import type { ActivityLog, Client, ExportJob, FileRow, NotificationRow, Portal, UploadSession } from '../db/schema';
+import type { ActivityDTO, ClientDTO, ExportJobDTO, FileDTO, MessageDTO, NotificationDTO, PortalDTO, UploadSessionDTO } from '@scenox/shared';
+import type { ActivityLog, Client, ExportJob, FileRow, messages, NotificationRow, Portal, UploadSession } from '../db/schema';
 import { decryptPortalUrl, portalEffectiveStatus } from './portal-tokens';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -192,6 +192,8 @@ export function activitySummary(a: Pick<ActivityLog, 'action' | 'actorLabel' | '
     'export.created': `Requested a ZIP of ${m.count ?? ''} files`,
     'export.downloaded': 'Downloaded a ZIP export',
     'settings.updated': 'Updated settings',
+    'message.posted': `${who} sent a message`,
+    'message.replied': 'Replied to a client message',
   };
   return map[a.action] ?? a.action;
 }
@@ -214,4 +216,25 @@ export function toActivityDTO(a: ActivityLog, clientName: string | null): Activi
     metadata: a.metadata ?? null,
     createdAt: a.createdAt.toISOString(),
   };
+}
+
+/** Message + joined user/file names → DTO. `forClient` adds the public-API `own` flag. */
+export function toMessageDTO(
+  m: typeof messages.$inferSelect,
+  extra: { userName?: string | null; fileName?: string | null; companyName: string },
+  opts: { forClient?: boolean } = {},
+): MessageDTO {
+  const dto: MessageDTO = {
+    id: m.id,
+    portalId: m.portalId,
+    fileId: m.fileId,
+    fileName: m.fileId ? (extra.fileName ?? null) : null,
+    authorType: m.authorType,
+    authorName: m.authorType === 'staff' ? (extra.userName ?? extra.companyName) : (m.authorName ?? 'Client'),
+    body: m.body,
+    createdAt: m.createdAt.toISOString(),
+    readAt: iso(m.readAt),
+  };
+  if (opts.forClient) dto.own = m.authorType === 'client';
+  return dto;
 }
