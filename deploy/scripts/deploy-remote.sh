@@ -88,9 +88,11 @@ if [[ "${FORCE_PORTS:-0}" != "1" ]]; then
 fi
 
 # ── 3. upload + unpack ───────────────────────────────────────────────────────
+# Code folders are replaced wholesale so files deleted upstream don't linger and break the build.
+# .env (secrets) and the Docker volumes (database, uploaded files) are never touched.
 log "Uploading package"
 "${SCP[@]}" "$PKG" "$TARGET:/tmp/scenox-vault.tar.gz"
-"${SSH[@]}" "${TTY[@]}" "$TARGET" "sudo mkdir -p '$INSTALL_DIR' && sudo tar xzf /tmp/scenox-vault.tar.gz -C '$INSTALL_DIR' && rm -f /tmp/scenox-vault.tar.gz && sudo find '$INSTALL_DIR/deploy' '$INSTALL_DIR/.env.example' '$INSTALL_DIR/docker-compose.yml' -type f -exec sed -i 's/\\r\$//' {} + && echo '$VERSION' | sudo tee '$INSTALL_DIR/.deployed-version' >/dev/null"
+"${SSH[@]}" "${TTY[@]}" "$TARGET" "sudo mkdir -p '$INSTALL_DIR' && cd '$INSTALL_DIR' && sudo rm -rf apps packages deploy scripts docs .github && sudo tar xzf /tmp/scenox-vault.tar.gz -C '$INSTALL_DIR' && rm -f /tmp/scenox-vault.tar.gz && sudo find '$INSTALL_DIR/deploy' '$INSTALL_DIR/.env.example' '$INSTALL_DIR/docker-compose.yml' -type f -exec sed -i 's/\\r\$//' {} + && echo '$VERSION' | sudo tee '$INSTALL_DIR/.deployed-version' >/dev/null"
 
 # ── 4. install / update ──────────────────────────────────────────────────────
 log "Installing on the server (first build takes a few minutes)"
