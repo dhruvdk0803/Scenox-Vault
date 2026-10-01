@@ -138,8 +138,9 @@ export const portals = pgTable(
     allowFolders: boolean('allow_folders').notNull().default(true),
     allowZip: boolean('allow_zip').notNull().default(true),
     allowResume: boolean('allow_resume').notNull().default(true),
-    allowClientViewFiles: boolean('allow_client_view_files').notNull().default(false),
+    allowClientViewFiles: boolean('allow_client_view_files').notNull().default(true),
     allowClientDeleteFiles: boolean('allow_client_delete_files').notNull().default(false),
+    allowClientMessages: boolean('allow_client_messages').notNull().default(true),
     notifyEmails: text('notify_emails').array().notNull().default(sql`'{}'::text[]`),
     notifyClient: boolean('notify_client').notNull().default(false),
     storageUsedBytes: big('storage_used_bytes').notNull().default(0),
@@ -321,6 +322,43 @@ export const activityLogs = pgTable(
   ],
 );
 
+// ───────────────────────── messages & file comments ─────────────────────────
+
+export const messageAuthorEnum = pgEnum('message_author', ['client', 'staff']);
+
+/**
+ * Conversation between the client (portal visitor) and the agency team, per portal.
+ * fileId set → it is a comment on that file; null → portal-level message.
+ */
+export const messages = pgTable(
+  'messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    portalId: uuid('portal_id')
+      .notNull()
+      .references(() => portals.id, { onDelete: 'cascade' }),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id').references(() => files.id, { onDelete: 'cascade' }),
+    uploadSessionId: uuid('upload_session_id').references(() => uploadSessions.id, { onDelete: 'set null' }),
+    authorType: messageAuthorEnum('author_type').notNull(),
+    authorUserId: uuid('author_user_id').references(() => users.id, { onDelete: 'set null' }),
+    authorName: text('author_name'),
+    authorEmail: text('author_email'),
+    body: text('body').notNull(),
+    /** set when the other side has seen it (staff for client messages, client for staff messages) */
+    readAt: ts('read_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('messages_portal_idx').on(t.portalId, t.createdAt),
+    index('messages_file_idx').on(t.fileId),
+    index('messages_client_idx').on(t.clientId),
+    index('messages_unread_idx').on(t.authorType, t.readAt),
+  ],
+);
+
 export const notifications = pgTable(
   'notifications',
   {
@@ -358,3 +396,4 @@ export type FileRow = typeof files.$inferSelect;
 export type ExportJob = typeof exportJobs.$inferSelect;
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
+export type MessageRow = typeof messages.$inferSelect;

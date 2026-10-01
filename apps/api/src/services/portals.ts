@@ -41,6 +41,7 @@ const settingsFields = {
   allowResume: z.boolean(),
   allowClientViewFiles: z.boolean(),
   allowClientDeleteFiles: z.boolean(),
+  allowClientMessages: z.boolean(),
   notifyEmails: z
     .array(emailSchema)
     .max(20, 'At most 20 notification emails.')

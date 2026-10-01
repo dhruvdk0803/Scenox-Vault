@@ -145,6 +145,7 @@ export interface PortalSettings {
   allowResume: boolean;
   allowClientViewFiles: boolean;
   allowClientDeleteFiles: boolean;
+  allowClientMessages: boolean; // client can message the team and comment on files
   notifyEmails: string[]; // admin recipients; empty = settings default
   notifyClient: boolean; // email uploader a receipt when they provided an email
 }
@@ -226,6 +227,7 @@ export interface PublicPortalDTO {
     allowResume: boolean;
     allowClientViewFiles: boolean;
     allowClientDeleteFiles: boolean;
+    allowClientMessages: boolean;
     allowMultipleSessions: boolean;
   };
   upload?: UploadEngineConfig;
@@ -531,6 +533,104 @@ export interface NotificationDTO {
   readAt: string | null;
   link: string | null;
   createdAt: string;
+}
+
+// ───────────────────────── client dashboard (public) ─────────────────────────
+// All endpoints below live under /api/public/portals/:token and need the x-portal-access
+// header when the portal is password protected. They do NOT need an upload session.
+
+export interface ClientDashboardDTO {
+  stats: {
+    files: number; // ready + processing + quarantined
+    totalBytes: number;
+    uploads: number; // upload sessions with ≥1 file
+    folders: number; // distinct top-level folders
+    lastUploadAt: string | null;
+  };
+  quota: { usedBytes: number; limitBytes: number | null };
+  expiresAt: string | null;
+  byType: { type: string; files: number; bytes: number }[]; // shared fileCategory buckets
+  recentUploads: ClientUploadDTO[]; // newest 5
+  recentFiles: ClientFileDTO[]; // newest 6 (only when allowClientViewFiles)
+  messages: { total: number; unread: number; latest: MessageDTO | null }; // unread = staff messages not yet seen by client
+}
+
+export interface ClientFileDTO {
+  id: string;
+  name: string;
+  relativePath: string;
+  extension: string;
+  type: string; // fileCategory
+  size: number;
+  status: FileStatus;
+  uploadedAt: string | null;
+  uploadedBy: string | null; // uploader name, if given
+  commentCount: number;
+  canDelete: boolean;
+}
+
+/** GET /browse?path=&q=&type=&sort=name|size|uploadedAt&order=&page=&pageSize= (requires allowClientViewFiles) */
+export interface ClientBrowseResponse {
+  path: string;
+  breadcrumbs: { name: string; path: string }[];
+  folders: { name: string; path: string; fileCount: number; totalBytes: number }[];
+  files: Paginated<ClientFileDTO>;
+}
+
+/** GET /uploads — upload history (requires allowClientViewFiles) */
+export interface ClientUploadDTO {
+  id: string;
+  uploaderName: string | null;
+  message: string | null;
+  files: number;
+  bytes: number;
+  status: UploadSessionStatus;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface MessageDTO {
+  id: string;
+  portalId: string;
+  fileId: string | null;
+  fileName: string | null;
+  authorType: 'client' | 'staff';
+  authorName: string; // staff: team member name (or company name); client: given name or "Client"
+  body: string; // plain text, max 5000 chars — render as text, never as HTML
+  createdAt: string;
+  readAt: string | null;
+  own?: boolean; // public API: true when written by the client side
+}
+
+/** GET /messages?fileId=&before=<iso>&limit=50 → newest last. Marks staff messages as read. */
+export interface MessageListResponse {
+  items: MessageDTO[];
+  hasMore: boolean;
+}
+
+/** POST /messages (public) */
+export interface PostClientMessageRequest {
+  body: string;
+  fileId?: string | null;
+  name?: string | null; // remembered by the browser; falls back to the upload session's uploader name
+  email?: string | null; // optional: lets the team's replies be emailed
+}
+
+/** POST /api/portals/:id/messages (admin) */
+export interface PostStaffMessageRequest {
+  body: string;
+  fileId?: string | null;
+}
+
+/** GET /api/messages/inbox — one row per portal that has messages, newest activity first */
+export interface InboxThreadDTO {
+  portalId: string;
+  portalName: string;
+  clientId: string;
+  clientName: string;
+  lastMessage: MessageDTO;
+  unread: number; // client messages not yet read by staff
+  total: number;
 }
 
 export type { DuplicateAction };

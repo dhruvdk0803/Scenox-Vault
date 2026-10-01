@@ -125,6 +125,29 @@ All paths are relative to `/api/public/portals/:token`. A wrong or revoked token
 | GET | `/files` | `x-upload-session` | portal must allow client view → `PublicFileDTO[]` (this session's/portal's files) |
 | DELETE | `/files/:fileId` | `x-upload-session` | portal must allow client delete; only files from this session |
 
+## Client dashboard (public)
+
+Paths are relative to `/api/public/portals/:token`. They need `x-portal-access` when the portal is password protected, but **no** upload session. Types: `ClientDashboardDTO`, `ClientBrowseResponse`, `ClientUploadDTO`, `MessageDTO`, `MessageListResponse`, `PostClientMessageRequest`.
+
+| Method | Path | Requires | Notes |
+|---|---|---|---|
+| GET | `/dashboard` | portal usable | stats, quota, file-type breakdown, recent uploads/files, message summary |
+| GET | `/browse` | allowClientViewFiles | `?path=&q=&type=&sort=name\|size\|uploadedAt&order=&page=&pageSize=` → `ClientBrowseResponse` (all files of this portal) |
+| GET | `/uploads` | allowClientViewFiles | upload history → `ClientUploadDTO[]` (newest first, ≤ 100) |
+| DELETE | `/files/:fileId` | allowClientDeleteFiles | any file of this portal |
+| GET | `/messages` | allowClientMessages | `?fileId=&before=&limit=` → `MessageListResponse`; marks staff messages read |
+| POST | `/messages` | allowClientMessages | `PostClientMessageRequest` → `MessageDTO` (rate limited 20/min/IP; notifies the team) |
+
+## Messages (admin)
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/api/messages/inbox` | portals.view | → `InboxThreadDTO[]` plus `unreadTotal` header field: response `{ items, unreadTotal }` |
+| GET | `/api/portals/:id/messages` | portals.view | `?fileId=&before=&limit=` → `MessageListResponse` |
+| POST | `/api/portals/:id/messages` | portals.manage | `PostStaffMessageRequest` → `MessageDTO` (emails the client if they left an email and SMTP is configured) |
+| POST | `/api/portals/:id/messages/read` | portals.view | marks client messages read → 204 |
+| GET | `/api/files/:id/comments` | files.view | → `MessageListResponse` (comments on that file) |
+
 ## tus upload endpoint
 
 `/api/tus` implements [tus 1.0.0](https://tus.io/protocols/resumable-upload) with the `creation`, `creation-with-upload`, `termination` and `expiration` extensions.

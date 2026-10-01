@@ -82,6 +82,7 @@ export async function buildPublicPortalDTO(req: FastifyRequest, token: string, p
       allowResume: portal.allowResume,
       allowClientViewFiles: portal.allowClientViewFiles,
       allowClientDeleteFiles: portal.allowClientDeleteFiles,
+      allowClientMessages: portal.allowClientMessages,
       allowMultipleSessions: portal.allowMultipleSessions,
     },
     upload: {

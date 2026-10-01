@@ -54,6 +54,7 @@ export function toPortalDTO(p: Portal, clientName: string): PortalDTO {
     allowResume: p.allowResume,
     allowClientViewFiles: p.allowClientViewFiles,
     allowClientDeleteFiles: p.allowClientDeleteFiles,
+    allowClientMessages: p.allowClientMessages,
     notifyEmails: p.notifyEmails,
     notifyClient: p.notifyClient,
     storageUsedBytes: num(p.storageUsedBytes),
