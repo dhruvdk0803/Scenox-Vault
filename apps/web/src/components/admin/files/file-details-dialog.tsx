@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Download } from 'lucide-react';
+import { Download, MessageSquare } from 'lucide-react';
 import { formatBytes, type FileDTO } from '@scenox/shared';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -13,6 +13,7 @@ import { CopyButton } from '@/components/ui/copy-button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/ui/status-badge';
+import { MessageThread } from '../messages/message-thread';
 import { ErrorState } from '../query-state';
 import { formatDateTime } from '../relative-time';
 import { downloadUrl, FileTypeIcon, filePath } from './file-utils';
@@ -113,6 +114,10 @@ export function FileDetailsDialog({ fileId, onOpenChange, initial }: { fileId: s
                 </Row>
               )}
             </dl>
+            <section aria-labelledby="file-comments-heading">
+              <h3 id="file-comments-heading" className="mb-2 flex items-center gap-2 text-sm font-semibold text-fg"><MessageSquare className="size-4 text-fg-subtle" aria-hidden /> Comments</h3>
+              <MessageThread portalId={file.portalId} fileId={file.id} compact className="h-72 overflow-hidden rounded-lg border border-border" />
+            </section>
             <div className="flex flex-wrap justify-end gap-2">
               <CopyButton value={filePath(file)} label="Copy path" showLabel variant="outline" />
               {canDownload && (

@@ -52,6 +52,7 @@ interface FormState {
   allowResume: boolean;
   allowClientViewFiles: boolean;
   allowClientDeleteFiles: boolean;
+  allowClientMessages: boolean;
   notifyEmails: string[];
   notifyClient: boolean;
 }
@@ -77,8 +78,9 @@ function fromPortal(p: PortalDTO | undefined, clientId?: string): FormState {
     requireMessage: p?.requireMessage ?? false,
     allowMultipleSessions: p?.allowMultipleSessions ?? true,
     allowResume: p?.allowResume ?? true,
-    allowClientViewFiles: p?.allowClientViewFiles ?? false,
+    allowClientViewFiles: p?.allowClientViewFiles ?? true,
     allowClientDeleteFiles: p?.allowClientDeleteFiles ?? false,
+    allowClientMessages: p?.allowClientMessages ?? true,
     notifyEmails: p?.notifyEmails ?? [],
     notifyClient: p?.notifyClient ?? false,
   };
@@ -202,6 +204,7 @@ export function PortalForm({ portal, defaultClientId }: PortalFormProps) {
       allowResume: form.allowResume,
       allowClientViewFiles: form.allowClientViewFiles,
       allowClientDeleteFiles: form.allowClientDeleteFiles,
+      allowClientMessages: form.allowClientMessages,
       notifyEmails: form.notifyEmails,
       notifyClient: form.notifyClient,
     };
@@ -340,8 +343,9 @@ export function PortalForm({ portal, defaultClientId }: PortalFormProps) {
         <Section title="Client permissions" description="What people with the link are allowed to do.">
           <ToggleRow label="Allow multiple uploads" description="The link can be used for more than one upload session." checked={form.allowMultipleSessions} onChange={(v) => set('allowMultipleSessions', v)} disabled={disabled} />
           <ToggleRow label="Allow resume" description="Interrupted uploads can pick up where they left off." checked={form.allowResume} onChange={(v) => set('allowResume', v)} disabled={disabled} />
-          <ToggleRow label="Client can view uploaded files" description="Show the uploader a list of files already in this portal." checked={form.allowClientViewFiles} onChange={(v) => set('allowClientViewFiles', v)} disabled={disabled} />
+          <ToggleRow label="Client can view uploaded files" description="Shows the client a dashboard of everything uploaded through this link." checked={form.allowClientViewFiles} onChange={(v) => set('allowClientViewFiles', v)} disabled={disabled} />
           <ToggleRow label="Client can delete their own files" description="Only files from their current upload session." checked={form.allowClientDeleteFiles} onChange={(v) => set('allowClientDeleteFiles', v)} disabled={disabled} />
+          <ToggleRow label="Client can send messages & comments" description="Lets the client write to your team and comment on files from their portal." checked={form.allowClientMessages} onChange={(v) => set('allowClientMessages', v)} disabled={disabled} />
         </Section>
 
         <Section title="Notifications" description="Who hears about uploads to this portal.">

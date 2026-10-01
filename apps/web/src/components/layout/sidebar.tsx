@@ -13,9 +13,10 @@ import { Logo } from '@/components/brand/logo';
 import { Avatar } from '@/components/ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui/toaster';
+import { useUnreadMessages } from '@/lib/hooks/use-messages';
 import { PRIMARY_NAV, SECONDARY_NAV, type NavItem } from './nav';
 
-function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
+function NavLink({ item, onNavigate, badge }: { item: NavItem; onNavigate?: () => void; badge?: number }) {
   const pathname = usePathname();
   const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
   const Icon = item.icon;
@@ -31,6 +32,12 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
     >
       <Icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-fg-subtle group-hover:text-fg-muted')} aria-hidden />
       {item.label}
+      {badge ? (
+        <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold leading-5 tabular-nums text-primary-foreground">
+          <span aria-hidden>{badge > 99 ? '99+' : badge}</span>
+          <span className="sr-only">{badge} unread</span>
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -89,6 +96,7 @@ export function SidebarContent({ me, onNavigate, showBell }: { me: MeDTO; onNavi
   const visible = (items: NavItem[]) => items.filter((i) => !i.permission || hasPermission(me.user.role, i.permission));
   const primary = visible(PRIMARY_NAV);
   const secondary = visible(SECONDARY_NAV);
+  const unreadMessages = useUnreadMessages(hasPermission(me.user.role, 'portals.view'));
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-14 shrink-0 items-center px-4">
@@ -101,7 +109,7 @@ export function SidebarContent({ me, onNavigate, showBell }: { me: MeDTO; onNavi
         <ul className="flex flex-col gap-0.5">
           {primary.map((item) => (
             <li key={item.href}>
-              <NavLink item={item} onNavigate={onNavigate} />
+              <NavLink item={item} onNavigate={onNavigate} badge={item.badge === 'messages' ? unreadMessages : undefined} />
             </li>
           ))}
         </ul>

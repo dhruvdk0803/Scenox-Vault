@@ -39,6 +39,11 @@ export const queryKeys = {
   activityAll: ['activity'] as const,
   audit: (p: object) => ['audit', p] as const,
   notifications: ['notifications'] as const,
+  messages: {
+    all: ['messages'] as const,
+    inbox: ['messages', 'inbox'] as const,
+    thread: (portalId: string, fileId?: string | null) => ['messages', 'thread', portalId, fileId ?? null] as const,
+  },
   storage: ['storage'] as const,
   system: ['system'] as const,
   settings: ['settings'] as const,

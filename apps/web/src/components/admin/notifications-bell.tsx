@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck, MessagesSquare } from 'lucide-react';
 import type { NotificationDTO, Paginated } from '@scenox/shared';
 import { api, errorMessage } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -63,7 +63,11 @@ export function NotificationsBell({ className }: { className?: string }) {
               {items.map((n) => {
                 const body = (
                   <>
-                    <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', n.readAt ? 'bg-transparent' : 'bg-primary')} aria-hidden />
+                    {n.type === 'client_message' ? (
+                      <MessagesSquare className={cn('mt-0.5 size-4 shrink-0', n.readAt ? 'text-fg-subtle' : 'text-primary')} aria-hidden />
+                    ) : (
+                      <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', n.readAt ? 'bg-transparent' : 'bg-primary')} aria-hidden />
+                    )}
                     <span className="min-w-0 flex-1">
                       <span className={cn('block text-sm', n.readAt ? 'text-fg-muted' : 'font-medium text-fg')}>{n.subject}{!n.readAt && <span className="sr-only"> (unread)</span>}</span>
                       {n.body && <span className="line-clamp-2 text-xs text-fg-subtle">{n.body}</span>}

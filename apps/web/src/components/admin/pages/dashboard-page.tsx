@@ -4,11 +4,12 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Activity, ArrowRight, Database, Download, FileText, Link2, Plus, UploadCloud, Users, Zap } from 'lucide-react';
+import { Activity, ArrowRight, Database, Download, FileText, Link2, MessagesSquare, Plus, UploadCloud, Users, Zap } from 'lucide-react';
 import { formatBytes, formatNumber, type DashboardDTO } from '@scenox/shared';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import { useMe, usePermission } from '@/lib/hooks/use-me';
+import { useUnreadMessages } from '@/lib/hooks/use-messages';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,6 +48,8 @@ export function DashboardPage() {
   const canClients = usePermission('clients.manage');
   const canPortals = usePermission('portals.manage');
   const canActivity = usePermission('activity.view');
+  const canViewPortals = usePermission('portals.view');
+  const unreadMessages = useUnreadMessages(canViewPortals);
   const { data, isPending, error, refetch, isFetching } = useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: ({ signal }) => api.get<DashboardDTO>('/dashboard', { signal }),
@@ -74,6 +77,20 @@ export function DashboardPage() {
         <Card><ErrorState error={error} onRetry={() => refetch()} retrying={isFetching} title="Couldn't load the dashboard" /></Card>
       ) : (
         <div className="space-y-6">
+          {unreadMessages > 0 && (
+            <Link
+              href="/messages"
+              className="group flex items-center gap-3 rounded-lg border border-primary-soft-border bg-primary-soft px-4 py-3 transition-colors duration-150 hover:bg-primary-soft/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground" aria-hidden><MessagesSquare className="size-4" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-primary-soft-fg">Unread messages</span>
+                <span className="block text-xs text-fg-muted"><span className="tabular-nums">{formatNumber(unreadMessages)}</span> new {unreadMessages === 1 ? 'message' : 'messages'} from clients waiting for a reply</span>
+              </span>
+              <span className="inline-flex items-center gap-1 text-sm font-medium text-primary-soft-fg">Open inbox <ArrowRight className="size-3.5 transition-transform duration-150 group-hover:translate-x-0.5" aria-hidden /></span>
+            </Link>
+          )}
+
           {data && <StorageBanner level={data.storage.warningLevel} usedBytes={data.storage.usedBytes} capacityBytes={data.storage.capacityBytes} />}
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

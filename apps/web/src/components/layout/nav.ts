@@ -1,5 +1,5 @@
 import {
-  Activity, FolderOpen, HardDrive, HeartPulse, LayoutDashboard, Link2, ScrollText, Settings, UploadCloud, Users, UserCog,
+  Activity, FolderOpen, HardDrive, HeartPulse, LayoutDashboard, Link2, MessagesSquare, ScrollText, Settings, UploadCloud, Users, UserCog,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permission } from '@scenox/shared';
@@ -10,6 +10,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** Hidden from the nav when the user lacks this permission. */
   permission?: Permission;
+  /** Show the unread-messages count as a badge. */
+  badge?: 'messages';
 }
 
 export const PRIMARY_NAV: NavItem[] = [
@@ -18,6 +20,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { label: 'Upload Portals', href: '/portals', icon: Link2, permission: 'portals.view' },
   { label: 'Files', href: '/files', icon: FolderOpen, permission: 'files.view' },
   { label: 'Uploads', href: '/uploads', icon: UploadCloud, permission: 'files.view' },
+  { label: 'Messages', href: '/messages', icon: MessagesSquare, permission: 'portals.view', badge: 'messages' },
   { label: 'Activity', href: '/activity', icon: Activity, permission: 'activity.view' },
   { label: 'Storage', href: '/storage', icon: HardDrive, permission: 'files.view' },
   { label: 'Settings', href: '/settings', icon: Settings, permission: 'settings.view' },

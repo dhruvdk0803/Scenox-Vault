@@ -2,13 +2,14 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, LinkIcon, Trash2 } from 'lucide-react';
 import { formatNumber, type PortalDTO } from '@scenox/shared';
 import { api, ApiClientError } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import { usePermission } from '@/lib/hooks/use-me';
+import { useInbox } from '@/lib/hooks/use-messages';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -24,12 +25,16 @@ import { toast } from '@/components/ui/toaster';
 import { useQueryClient } from '@tanstack/react-query';
 import { errorMessage } from '@/lib/api';
 import { FileBrowser } from '../files/file-browser';
+import { UnreadBadge } from '../messages/inbox-list';
+import { PortalMessageThread } from '../messages/portal-message-thread';
 import { PortalLinkCard } from '../portal-link-card';
 import { PortalForm } from '../portals/portal-form';
 import { PortalLogoCard } from '../portals/portal-logo-card';
 import { ErrorState } from '../query-state';
 import { RelativeTime } from '../relative-time';
 import { UploadsTable } from '../uploads/uploads-table';
+
+const TABS = ['settings', 'sessions', 'files', 'messages'];
 
 export function PortalDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -38,6 +43,20 @@ export function PortalDetailPage() {
   const canManage = usePermission('portals.manage');
   const canDelete = usePermission('files.delete');
   const [deleting, setDeleting] = React.useState(false);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const tab = tabParam && TABS.includes(tabParam) ? tabParam : 'settings';
+  const { data: inbox } = useInbox();
+  const unreadMessages = inbox?.items.find((t) => t.portalId === id)?.unread ?? 0;
+
+  function changeTab(next: string) {
+    const sp = new URLSearchParams(searchParams.toString());
+    if (next === 'settings') sp.delete('tab');
+    else sp.set('tab', next);
+    const query = sp.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
 
   const { data: portal, isPending, error, refetch, isFetching } = useQuery({
     queryKey: queryKeys.portals.detail(id),
@@ -84,11 +103,12 @@ export function PortalDetailPage() {
         <StatCard label="Last accessed" loading={isPending} value={<span className="text-lg"><RelativeTime date={portal?.lastAccessedAt} fallback="Never" /></span>} />
       </div>
 
-      <Tabs defaultValue="settings">
+      <Tabs value={tab} onValueChange={changeTab}>
         <TabsList aria-label="Portal sections">
           <TabsTrigger value="settings">Settings</TabsTrigger>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="files">Files</TabsTrigger>
+          <TabsTrigger value="messages">Messages <UnreadBadge count={unreadMessages} /></TabsTrigger>
         </TabsList>
         <TabsContent value="settings" className="space-y-6">
           {portal ? (
@@ -100,6 +120,11 @@ export function PortalDetailPage() {
         </TabsContent>
         <TabsContent value="sessions"><UploadsTable fixedPortalId={id} pageSize={10} filters={false} /></TabsContent>
         <TabsContent value="files">{portal && <FileBrowser clientId={portal.clientId} portalId={portal.id} />}</TabsContent>
+        <TabsContent value="messages">
+          <Card className="overflow-hidden">
+            <PortalMessageThread portalId={id} className="h-[min(36rem,calc(100dvh-12rem))] min-h-[22rem]" />
+          </Card>
+        </TabsContent>
       </Tabs>
 
       <ConfirmDialog

@@ -4,11 +4,12 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Activity, FileText, Link2, Mail, PauseCircle, Pencil, PlayCircle, Plus, Phone, Trash2, Building2, UserX } from 'lucide-react';
+import { Activity, FileText, Link2, Mail, PauseCircle, Pencil, PlayCircle, Plus, Phone, Trash2, Building2, MessagesSquare, UserX } from 'lucide-react';
 import { formatNumber, type ActivityDTO, type ClientDTO, type Paginated, type PortalDTO } from '@scenox/shared';
 import { api, ApiClientError, qs } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import { usePermission } from '@/lib/hooks/use-me';
+import { useInbox } from '@/lib/hooks/use-messages';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ActivityFeed } from '../activity-feed';
 import { ClientDeleteDialog, ClientFormDialog, useToggleClientStatus } from '../clients/client-dialogs';
 import { FileBrowser } from '../files/file-browser';
+import { InboxList, UnreadBadge } from '../messages/inbox-list';
 import { PortalCard } from '../portals/portal-card';
 import { ErrorState } from '../query-state';
 import { formatDateTime } from '../relative-time';
@@ -47,6 +49,16 @@ function ClientPortals({ clientId, canCreate }: { clientId: string; canCreate: b
       </Card>
     );
   return <div className="grid gap-4 md:grid-cols-2">{data.items.map((p) => <PortalCard key={p.id} portal={p} />)}</div>;
+}
+
+function ClientMessages({ clientId }: { clientId: string }) {
+  const { data, isPending, error, refetch, isFetching } = useInbox();
+  const threads = React.useMemo(() => (data?.items ?? []).filter((t) => t.clientId === clientId), [data, clientId]);
+  if (error && !data) return <Card><ErrorState error={error} onRetry={() => refetch()} retrying={isFetching} title="Couldn't load messages" /></Card>;
+  if (isPending) return <Card><div className="space-y-4 p-4">{Array.from({ length: 2 }, (_, i) => <Skeleton key={i} className="h-14" />)}</div></Card>;
+  if (threads.length === 0)
+    return <Card><EmptyState icon={<MessagesSquare />} title="No messages yet" description="When this client writes to you from one of their portals, the conversation appears here." /></Card>;
+  return <Card className="overflow-hidden"><InboxList threads={threads} selectedPortalId={null} /></Card>;
 }
 
 function ClientActivity({ clientId }: { clientId: string }) {
@@ -82,6 +94,8 @@ export function ClientDetailPage() {
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState<ClientDTO | null>(null);
   const toggle = useToggleClientStatus();
+  const { data: inbox } = useInbox();
+  const unreadMessages = (inbox?.items ?? []).filter((t) => t.clientId === id).reduce((n, t) => n + t.unread, 0);
 
   const { data: client, isPending, error, refetch, isFetching } = useQuery({
     queryKey: queryKeys.clients.detail(id),
@@ -146,6 +160,7 @@ export function ClientDetailPage() {
           <TabsTrigger value="portals">Portals</TabsTrigger>
           <TabsTrigger value="files">Files</TabsTrigger>
           <TabsTrigger value="uploads">Uploads</TabsTrigger>
+          <TabsTrigger value="messages">Messages <UnreadBadge count={unreadMessages} /></TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
         </TabsList>
 
@@ -175,6 +190,7 @@ export function ClientDetailPage() {
         <TabsContent value="portals"><ClientPortals clientId={id} canCreate={canPortals} /></TabsContent>
         <TabsContent value="files"><FileBrowser clientId={id} /></TabsContent>
         <TabsContent value="uploads"><UploadsTable fixedClientId={id} pageSize={25} /></TabsContent>
+        <TabsContent value="messages"><ClientMessages clientId={id} /></TabsContent>
         <TabsContent value="activity"><ClientActivity clientId={id} /></TabsContent>
       </Tabs>
 
