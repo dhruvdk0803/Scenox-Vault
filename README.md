@@ -46,10 +46,13 @@ pnpm db:migrate
 
 pnpm --filter @scenox/api dev            # API + tus on :4000
 pnpm --filter @scenox/api dev:worker     # background jobs (checksums, scans, ZIPs, e-mail)
-pnpm --filter @scenox/web dev            # web on :3000 (proxies /api to :4000)
+pnpm --filter @scenox/web dev            # web on :3000
+pnpm dev:proxy                           # :8080 → /api to :4000, everything else to :3000 (mirrors Caddy)
 ```
 
-Open <http://localhost:3000/setup> to create the owner account. Then create a client and a portal and open the portal link in a private window.
+Open <http://localhost:8080/setup> to create the owner account. Then create a client and a portal and open the portal link in a private window.
+
+Always use :8080 in development. Next.js's built-in `/api` rewrite on :3000 buffers request bodies (10 MB cap), so large uploads must go through the streaming dev proxy, just as they go through Caddy in production.
 
 Handy: `pnpm typecheck`, `pnpm test` (API tests need the dev Postgres; they use the `scenox_test` database — `createdb`/`CREATE EXTENSION pg_trgm` as in [CI](.github/workflows/ci.yml)), `pnpm db:generate` after editing `apps/api/src/db/schema.ts`.
 

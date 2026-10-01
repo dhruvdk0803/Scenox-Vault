@@ -54,6 +54,8 @@ async function reactivateSession(tx: Tx, sessionId: string) {
 
 const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/i;
 const DUP_ACTIONS: readonly string[] = ['replace', 'keep_both', 'skip'];
+/** An 'uploading' row with no progress for this long is treated as abandoned. */
+const STALE_UPLOAD_MS = 15 * 60_000;
 
 function parseLastModified(v: string | null | undefined): Date | null {
   if (!v) return null;
@@ -186,7 +188,17 @@ export function createTusServer(): TusService {
           throw tusError(413, 'quota_exceeded', quotaMessage(quota.remainingBytes));
         }
 
-        // a retry of a file this session already started supersedes the stale attempt
+        // A re-created upload of a file that is still 'uploading' supersedes the earlier attempt
+        // (instead of producing "name (1).ext" copies) when it is clearly the same file:
+        //  - started by this session, or
+        //  - started through this portal with the same size + lastModified (page reload / new session), or
+        //  - abandoned (no bytes received for STALE_UPLOAD_MS).
+        const staleBefore = Date.now() - STALE_UPLOAD_MS;
+        const isRetryOf = (f: FileRow) =>
+          f.status === 'uploading' &&
+          (f.uploadSessionId === session.id ||
+            (f.portalId === portal.id && Number(f.size) === size && !!lastModified && f.lastModified?.getTime() === lastModified.getTime()) ||
+            f.updatedAt.getTime() < staleBefore);
         const existing = await tx
           .select()
           .from(files)
@@ -199,7 +211,7 @@ export function createTusServer(): TusService {
             ),
           );
         const live = existing.filter((f) => {
-          if (f.status === 'uploading' && f.uploadSessionId === session.id) {
+          if (isRetryOf(f)) {
             superseded.push(f);
             return false;
           }

@@ -165,9 +165,14 @@ describe('GET /api/system', () => {
     expect(checks.storage.status).toBe('ok');
     expect(checks.clamav.status).toBe('disabled');
     expect(checks.smtp.status).toBe('disabled');
-    expect(checks.worker.status).toBe('down');
-    expect(checks.worker.message).toBe('No worker process connected');
-    expect(s.status).toBe('degraded');
+    // a BullMQ worker may or may not be connected to this Redis (e.g. another test file's worker)
+    if (checks.worker.status === 'down') {
+      expect(checks.worker.message).toBe('No worker process connected');
+      expect(s.status).toBe('degraded');
+    } else {
+      expect(checks.worker.status).toBe('ok');
+      expect(s.status).toBe('ok');
+    }
     expect(s.queues.map((q: { name: string }) => q.name).sort()).toEqual(['exports', 'file-processing', 'maintenance', 'notifications']);
     const viewer = await loginAs(app, 'viewer');
     expect((await get('/api/system', viewer.headers)).statusCode).toBe(403);

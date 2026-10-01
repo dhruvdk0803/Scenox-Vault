@@ -470,8 +470,16 @@ export class UploadManager {
         if (this.session) req.setHeader(UPLOAD_SESSION_HEADER, this.session.sessionToken);
         if (current()) item.lastProgressAt = this.now();
       },
-      onAfterResponse: () => {
+      onAfterResponse: (req: { getMethod(): string }, res: { getStatus(): number }) => {
         if (current()) item.lastProgressAt = this.now();
+        // tus-js-client treats ANY non-2xx answer to the resume HEAD (even a 502/503 while the
+        // server restarts) as "upload gone" and silently starts the file over from byte 0.
+        // Throwing here turns server-side/transient failures into a normal retryable error, so the
+        // retry loop keeps the upload URL and resumes from the server offset. Real 4xx still restart.
+        const status = res.getStatus();
+        if (req.getMethod() === 'HEAD' && (status === 0 || status >= 500 || status === 408 || status === 429)) {
+          throw new Error(`tus: resume check failed with HTTP ${status}; will retry`);
+        }
       },
       onProgress: (sent: number, total: number) => {
         if (!current()) return;
