@@ -1,0 +1,70 @@
+name: Deploy
+
+# Push-button deploy/update to your VPS: Actions → Deploy → Run workflow.
+# Runs deploy/scripts/deploy-remote.sh from a GitHub runner over SSH.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_SSH_KEY     private key whose public half is in ~/.ssh/authorized_keys of the deploy user
+#   DEPLOY_ACME_EMAIL  e-mail for Let's Encrypt certificate notices
+#   OWNER_EMAIL        (optional) owner account created on first install
+#   OWNER_PASSWORD     (optional) its password, min. 12 characters
+# The deploy user needs passwordless sudo (or use root), because nothing can type a sudo password in CI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: SSH target (user@host)
+        required: true
+        default: dhruv@188.245.6.249
+      domain:
+        description: Public domain
+        required: true
+        default: vault.scenoxlabs.com
+      ssh_port:
+        description: SSH port
+        required: true
+        default: '22'
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          TARGET: ${{ inputs.target }}
+          SSH_PORT: ${{ inputs.ssh_port }}
+        run: |
+          test -n "$DEPLOY_SSH_KEY" || { echo "::error::Secret DEPLOY_SSH_KEY is not set"; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          host="${TARGET#*@}"
+          ssh-keyscan -p "$SSH_PORT" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host %s\n  IdentityFile ~/.ssh/id_deploy\n  IdentitiesOnly yes\n  BatchMode yes\n' "$host" > ~/.ssh/config
+          ssh -p "$SSH_PORT" "$TARGET" 'sudo -n true' || { echo "::error::SSH works only if the key is authorized AND the user has passwordless sudo"; exit 1; }
+
+      - name: Deploy
+        env:
+          TARGET: ${{ inputs.target }}
+          DOMAIN: ${{ inputs.domain }}
+          SSH_PORT: ${{ inputs.ssh_port }}
+          ACME_EMAIL: ${{ secrets.DEPLOY_ACME_EMAIL }}
+          OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
+          OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
+        run: |
+          test -n "$ACME_EMAIL" || { echo "::error::Secret DEPLOY_ACME_EMAIL is not set"; exit 1; }
+          bash deploy/scripts/deploy-remote.sh "$TARGET" "$DOMAIN" "$ACME_EMAIL" "$OWNER_EMAIL" < /dev/null
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/id_deploy

@@ -16,7 +16,7 @@
 # Re-running it later is the update path: new code is unpacked over the old, images are rebuilt,
 # migrations run automatically on API start, data and secrets are untouched.
 #
-# Optional env: SSH_PORT (default 22), INSTALL_DIR (default /opt/scenox-vault), UPLOAD_DOMAIN (default = domain),
+# Optional env: OWNER_PASSWORD (non-interactive owner creation), SSH_PORT (default 22), INSTALL_DIR (default /opt/scenox-vault), UPLOAD_DOMAIN (default = domain),
 #               SKIP_FIREWALL=1, FORCE_PORTS=1 (skip the 80/443 conflict check)
 set -euo pipefail
 
@@ -42,6 +42,8 @@ cd "$ROOT"
 [[ -f docker-compose.yml ]] || die "Run this from a Scenox Vault checkout"
 
 SSH=(ssh -p "$SSH_PORT" -o ServerAliveInterval=30)
+# Allocate a TTY only when we have one (laptop: sudo/password prompts work; CI: fully non-interactive).
+if [[ -t 0 ]]; then TTY=(-t); else TTY=(-T); fi
 SCP=(scp -P "$SSH_PORT" -q)
 
 # ── 1. package ───────────────────────────────────────────────────────────────
@@ -85,18 +87,23 @@ fi
 # ── 3. upload + unpack ───────────────────────────────────────────────────────
 log "Uploading package"
 "${SCP[@]}" "$PKG" "$TARGET:/tmp/scenox-vault.tar.gz"
-"${SSH[@]}" -t "$TARGET" "sudo mkdir -p '$INSTALL_DIR' && sudo tar xzf /tmp/scenox-vault.tar.gz -C '$INSTALL_DIR' && rm -f /tmp/scenox-vault.tar.gz && echo '$VERSION' | sudo tee '$INSTALL_DIR/.deployed-version' >/dev/null"
+"${SSH[@]}" "${TTY[@]}" "$TARGET" "sudo mkdir -p '$INSTALL_DIR' && sudo tar xzf /tmp/scenox-vault.tar.gz -C '$INSTALL_DIR' && rm -f /tmp/scenox-vault.tar.gz && echo '$VERSION' | sudo tee '$INSTALL_DIR/.deployed-version' >/dev/null"
 
 # ── 4. install / update ──────────────────────────────────────────────────────
 log "Installing on the server (first build takes a few minutes)"
-"${SSH[@]}" -t "$TARGET" "cd '$INSTALL_DIR' && sudo APP_DOMAIN='$DOMAIN' UPLOAD_DOMAIN='$UPLOAD_DOMAIN' ACME_EMAIL='$ACME_EMAIL' NONINTERACTIVE=1 INSTALL_DIR='$INSTALL_DIR' SKIP_FIREWALL='${SKIP_FIREWALL:-0}' bash deploy/scripts/install.sh"
+"${SSH[@]}" "${TTY[@]}" "$TARGET" "cd '$INSTALL_DIR' && sudo APP_DOMAIN='$DOMAIN' UPLOAD_DOMAIN='$UPLOAD_DOMAIN' ACME_EMAIL='$ACME_EMAIL' NONINTERACTIVE=1 INSTALL_DIR='$INSTALL_DIR' SKIP_FIREWALL='${SKIP_FIREWALL:-0}' bash deploy/scripts/install.sh"
 
 # ── 5. owner account (first install only) ────────────────────────────────────
 if [[ -n "$OWNER_EMAIL" ]]; then
   users="$("${SSH[@]}" "$TARGET" "cd '$INSTALL_DIR' && sudo docker compose exec -T api node dist/cli.js list-users 2>/dev/null | grep -c '@' || true")"
   if [[ "${users:-0}" == "0" ]]; then
     log "Creating the owner account $OWNER_EMAIL — choose a password (min. 12 characters)"
-    "${SSH[@]}" -t "$TARGET" "cd '$INSTALL_DIR' && sudo docker compose exec api node dist/cli.js create-owner --email '$OWNER_EMAIL' --name 'Owner'"
+    if [[ -n "${OWNER_PASSWORD:-}" ]]; then
+      # non-interactive (CI): password travels over SSH stdin, so it never appears in CI logs or local argv
+      printf '%s' "$OWNER_PASSWORD" | "${SSH[@]}" -T "$TARGET" "cd '$INSTALL_DIR' && sudo docker compose exec -T -e SCENOX_PASSWORD=\"\$(cat)\" api node dist/cli.js create-owner --email '$OWNER_EMAIL' --name 'Owner'"
+    else
+      "${SSH[@]}" "${TTY[@]}" "$TARGET" "cd '$INSTALL_DIR' && sudo docker compose exec api node dist/cli.js create-owner --email '$OWNER_EMAIL' --name 'Owner'"
+    fi
   else
     log "Users already exist; skipping owner creation"
   fi
