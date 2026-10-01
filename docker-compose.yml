@@ -1,0 +1,197 @@
+# Scenox Vault — production stack
+#
+#   cp .env.example .env   # then edit (or run deploy/scripts/install.sh)
+#   docker compose up -d --build
+#   docker compose --profile clamav up -d      # + ClamAV virus scanning
+#
+# Only Caddy publishes ports (80/443 tcp, 443 udp for HTTP/3).
+# Postgres, Redis, API, web and ClamAV are reachable only on the internal network.
+
+name: scenox-vault
+
+x-api-env: &api-env
+  NODE_ENV: production
+  # Values below are derived so a single .env drives everything. Override by editing this file.
+  DATABASE_URL: postgres://${POSTGRES_USER:-scenox}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-scenox}
+  REDIS_URL: redis://redis:6379
+  STORAGE_PATH: /data/storage
+  APP_URL: https://${APP_DOMAIN:?APP_DOMAIN is required}
+  UPLOAD_URL: https://${UPLOAD_DOMAIN:-${APP_DOMAIN}}
+  CLAMAV_HOST: clamav
+  TRUST_PROXY: "1"
+
+services:
+  # ───────────────────────── reverse proxy / TLS ─────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 (QUIC)
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      UPLOAD_DOMAIN: ${UPLOAD_DOMAIN:-${APP_DOMAIN}}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [vault]
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: &log
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  # ───────────────────────── web (Next.js standalone) ─────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        API_INTERNAL_URL: http://api:4000
+    image: scenox-vault-web:${VAULT_VERSION:-latest}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      API_INTERNAL_URL: http://api:4000
+      # Admin routes return 404 on this host (client-facing upload domain). Leave EMPTY in single-domain mode.
+      UPLOAD_HOST: ${UPLOAD_HOST:-}
+    networks: [vault]
+    mem_limit: 768m
+    logging: *log
+
+  # ───────────────────────── api (Fastify + tus) ─────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: scenox-vault-api:${VAULT_VERSION:-latest}
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      <<: *api-env
+      MIGRATE_ON_START: ${MIGRATE_ON_START:-true}
+      SERVICE_NAME: api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - upload_data:/data/storage
+    networks: [vault]
+    stop_grace_period: 60s
+    logging: *log
+
+  # ───────────────────────── worker (same image) ─────────────────────────
+  worker:
+    image: scenox-vault-api:${VAULT_VERSION:-latest}
+    restart: unless-stopped
+    init: true
+    command: ["node", "dist/worker.js"]
+    env_file: .env
+    environment:
+      <<: *api-env
+      SERVICE_NAME: worker
+    depends_on:
+      api:
+        condition: service_healthy # api applies migrations before the worker starts
+      redis:
+        condition: service_healthy
+    volumes:
+      - upload_data:/data/storage
+    networks: [vault]
+    healthcheck:
+      disable: true # no HTTP port; liveness is handled by `restart: unless-stopped`
+    stop_grace_period: 120s # let an in-flight checksum / ZIP finish
+    logging: *log
+
+  # ───────────────────────── data stores ─────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-scenox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-scenox}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
+      - -c
+      - max_connections=100
+      - -c
+      - log_min_duration_statement=1000
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [vault] # never published to the host
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *log
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # AOF so queued jobs survive restarts; noeviction because BullMQ needs its keys.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction", "--maxmemory", "${REDIS_MAXMEMORY:-256mb}"]
+    volumes:
+      - redis_data:/data
+    networks: [vault]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging: *log
+
+  # ───────────────────────── optional: ClamAV ─────────────────────────
+  # docker compose --profile clamav up -d   (and set CLAMAV_ENABLED=true in .env)
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ["clamav"]
+    restart: unless-stopped
+    environment:
+      CLAMD_STARTUP_TIMEOUT: "180"
+    volumes:
+      - clamav_data:/var/lib/clamav
+      - upload_data:/data/storage:ro
+    networks: [vault]
+    mem_limit: 3g # signature DB is loaded into RAM (~1.5-2 GB)
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    logging: *log
+
+networks:
+  vault: {}
+
+volumes:
+  postgres_data:
+  redis_data:
+  upload_data:
+  caddy_data:
+  caddy_config:
+  clamav_data:

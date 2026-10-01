@@ -1,0 +1,101 @@
+# Scenox Vault — Caddy 2 reverse proxy
+#
+# Environment (passed by docker-compose.yml from .env):
+#   APP_DOMAIN     admin dashboard host, e.g. app.example.com
+#   UPLOAD_DOMAIN  client portal host,   e.g. upload.example.com
+#                  (single-domain mode: set it equal to APP_DOMAIN — duplicates are fine)
+#   ACME_EMAIL     Let's Encrypt / ZeroSSL account e-mail
+#
+# Routing on BOTH hosts (same-origin, so no CORS is needed):
+#   /api/*  -> api:4000   (REST + tus uploads at /api/tus + downloads)
+#   others  -> web:3000   (Next.js)
+# The web app hides admin routes on the upload host (UPLOAD_HOST env) so clients never see the admin UI.
+#
+# Why one block for both domains? Caddy rejects two blocks with the same address, so a
+# single "a, b" block is what makes single-domain mode work without editing this file.
+# The two hosts are functionally identical at the proxy; separation is enforced by the web app.
+{
+	email {$ACME_EMAIL}
+
+	servers {
+		# HTTP/1.1 + HTTP/2 + HTTP/3 (QUIC). Publish 443/udp in docker-compose.yml.
+		protocols h1 h2 h3
+		timeouts {
+			read_header 30s
+			# Request bodies are 64 MB+ chunks from slow uplinks: no read/write deadline at the edge.
+			read_body 0
+			write 0
+			idle 5m
+		}
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+		-Server
+	}
+}
+
+{$APP_DOMAIN}, {$UPLOAD_DOMAIN} {
+	import security_headers
+
+	# No request body size limit (Caddy's default is unlimited; never add `request_body { max_size }`).
+
+	# Nothing on disk is ever served from the proxy. Belt and braces.
+	@blocked path /data /data/* /.env /.env.* /.git /.git/* /storage /storage/*
+	handle @blocked {
+		respond "Not found" 404
+	}
+
+	# API: REST, tus uploads, downloads. NEVER compressed (binary streams, already-compressed media).
+	handle /api/* {
+		reverse_proxy api:4000 {
+			# Stream request bodies to the API as they arrive (tus PATCH) and flush responses immediately.
+			request_buffers 0
+			flush_interval -1
+			# Chunk uploads/downloads may run for hours on slow links.
+			transport http {
+				dial_timeout 10s
+				response_header_timeout 6h
+				read_timeout 6h
+				write_timeout 6h
+				keepalive 2m
+			}
+			health_uri /health
+			health_interval 30s
+			health_timeout 5s
+			# trusted-proxy headers (api TRUST_PROXY=1 reads X-Forwarded-For from Caddy)
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# Web app: compressible text responses only.
+	handle {
+		encode zstd gzip
+		header Content-Security-Policy "frame-ancestors 'none'"
+		header X-Frame-Options "DENY"
+		reverse_proxy web:3000 {
+			flush_interval -1
+		}
+	}
+
+	log {
+		output stdout
+		format filter {
+			wrap json
+			# Never log credentials; portal tokens in URLs are masked.
+			request>headers>Cookie delete
+			request>headers>Authorization delete
+			request>headers>X-Upload-Session delete
+			request>headers>X-Portal-Access delete
+			request>uri regexp (/u/|/portals/)[^/?#]+ $1[token]
+		}
+	}
+}
+
+# ───────────────────────── Optional: HTTP -> HTTPS ─────────────────────────
+# Caddy redirects HTTP to HTTPS automatically for every site above. Nothing to add.

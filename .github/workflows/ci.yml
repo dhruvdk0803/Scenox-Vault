@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from "packageManager" in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  api-tests:
+    name: API tests (Postgres + Redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: scenox
+          POSTGRES_PASSWORD: scenox
+          POSTGRES_DB: scenox_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U scenox -d scenox_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://scenox:scenox@localhost:5432/scenox_test
+      REDIS_URL: redis://localhost:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Enable pg_trgm
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y --no-install-recommends postgresql-client
+          PGPASSWORD=scenox psql -h localhost -U scenox -d scenox_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+      - name: Shared package tests
+        run: pnpm --filter @scenox/shared exec vitest run --passWithNoTests
+      - name: API tests
+        run: pnpm --filter @scenox/api test
+
+  web:
+    name: Web tests + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Unit tests
+        run: pnpm --filter @scenox/web exec vitest run --passWithNoTests
+      - name: Build (Next.js standalone)
+        run: pnpm --filter @scenox/web build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Build API bundle
+        run: pnpm --filter @scenox/api build
+
+  deploy-config:
+    name: Deployment files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck -x deploy/scripts/*.sh
+      - name: docker compose config
+        run: |
+          cp .env.example .env
+          docker compose config -q
+          docker compose --profile clamav config -q
+          docker compose -f docker-compose.dev.yml config -q
+      - name: Caddyfile validates
+        run: |
+          APP_DOMAIN=app.example.com UPLOAD_DOMAIN=upload.example.com ACME_EMAIL=ci@example.com \
+          docker run --rm -e APP_DOMAIN -e UPLOAD_DOMAIN -e ACME_EMAIL \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+            caddy validate --config /etc/caddy/Caddyfile
+
+  docker:
+    name: Docker build (no push)
+    runs-on: ubuntu-latest
+    needs: [typecheck]
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.image }}/Dockerfile
+          push: false
+          tags: scenox-vault-${{ matrix.image }}:ci
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

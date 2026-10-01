@@ -1,0 +1,105 @@
+# Scenox Vault — Nginx alternative to Caddy (you manage TLS yourself, e.g. certbot).
+#
+# Assumes Nginx runs on the host and the compose stack publishes api/web on loopback.
+# Add to docker-compose.override.yml:
+#   services:
+#     api: { ports: ["127.0.0.1:4000:4000"] }
+#     web: { ports: ["127.0.0.1:3000:3000"] }
+#   and disable caddy:  docker compose up -d --scale caddy=0
+#
+# Install:  cp deploy/nginx.conf.example /etc/nginx/conf.d/scenox-vault.conf
+#           certbot --nginx -d app.example.com -d upload.example.com
+# Set api TRUST_PROXY=1 (default) so X-Forwarded-For is trusted.
+
+upstream scenox_api { server 127.0.0.1:4000; keepalive 32; }
+upstream scenox_web { server 127.0.0.1:3000; keepalive 16; }
+
+map $http_upgrade $connection_upgrade { default upgrade; '' ''; }
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name app.example.com upload.example.com;
+    location /.well-known/acme-challenge/ { root /var/www/html; }
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    # HTTP/3 needs nginx >= 1.25 built with QUIC:
+    # listen 443 quic reuseport; listen [::]:443 quic reuseport;
+    # add_header Alt-Svc 'h3=":443"; ma=86400' always;
+    server_name app.example.com upload.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/app.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/app.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # ── uploads: no body limit, no buffering ──
+    client_max_body_size 0;
+    client_body_timeout 3600s;
+    client_header_timeout 30s;
+    keepalive_timeout 75s;
+    send_timeout 3600s;
+
+    # ── security headers ──
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+    server_tokens off;
+
+    # Never expose anything on disk.
+    location ~ ^/(data|storage|\.git|\.env) { return 404; }
+
+    # ── API: REST + tus + downloads (no compression, no buffering) ──
+    location /api/ {
+        proxy_pass http://scenox_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+
+        proxy_request_buffering off;   # stream tus PATCH bodies straight to the API
+        proxy_buffering off;           # stream downloads, no temp files on the proxy
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_connect_timeout 10s;
+        gzip off;
+
+        # tus headers (Tus-Resumable, Upload-Offset, Upload-Length, Upload-Metadata, Location) pass through untouched.
+        # Do NOT add auth_request, limit_req or gzip here: these routes carry multi-GB streams.
+    }
+
+    # ── web (Next.js) ──
+    location / {
+        proxy_pass http://scenox_web;
+        proxy_http_version 1.1;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_read_timeout 60s;
+
+        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header X-Frame-Options "DENY" always;
+        # re-add the global headers (add_header in a location resets inherited ones)
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+
+        gzip on;
+        gzip_types text/plain text/css application/json application/javascript text/javascript image/svg+xml;
+    }
+}
