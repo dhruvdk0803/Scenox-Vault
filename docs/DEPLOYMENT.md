@@ -4,6 +4,20 @@ Target: a single Ubuntu 22.04 / 24.04 VPS (2 vCPU / 4 GB RAM is comfortable; 1 v
 
 Contents: [1 Fast path](#1-fast-path-installer) · [2 Step by step](#2-fresh-vps-step-by-step) · [3 DNS](#3-dns-records) · [4 HTTPS](#4-https) · [5 Domains](#5-adding-or-changing-domains--single-domain-mode) · [6 Env reference](#6-environment-reference) · [7 ClamAV](#7-clamav) · [8 SMTP](#8-smtp) · [9 Updates](#9-updates) · [10 Backup & restore](#10-backup--restore) · [11 Monitoring](#11-monitoring--health) · [12 Capacity](#12-disk-capacity-planning) · [13 Move storage](#13-moving-storage-to-a-larger-volume) · [14 Object storage](#14-migrating-to-object-storage-s3--r2--b2--minio) · [15 Troubleshooting](#15-troubleshooting)
 
+## 0. One command from your laptop (recommended)
+
+From a checkout of this repository on your own machine (needs `ssh`/`scp` and an SSH login with `sudo` on the server):
+
+```bash
+bash deploy/scripts/deploy-remote.sh <user@server> <domain> <acme-email> [owner-email]
+# e.g.
+bash deploy/scripts/deploy-remote.sh dhruv@188.245.6.249 vault.scenoxlabs.com you@company.com you@company.com
+```
+
+It refuses to continue if the domain's A record doesn't point at the server or if another web server already holds ports 80/443. Then it uploads the committed code to `/opt/scenox-vault`, runs the installer (Docker, generated secrets, firewall, build, start, health check), creates the owner account over the CLI (so `/setup` can't be claimed by someone else), and checks `https://<domain>/api/ready` from outside.
+
+**Updating** is the same command: new code is unpacked over the old, images rebuild, migrations run on API start; `.env`, the database and uploaded files are untouched.
+
 ## 1. Fast path (installer)
 
 ```bash
