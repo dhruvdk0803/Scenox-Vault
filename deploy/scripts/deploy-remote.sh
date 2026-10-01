@@ -123,8 +123,11 @@ for _ in $(seq 1 30); do
 done
 if [[ "$ok" == "1" ]]; then
   log "Live: https://$DOMAIN  (health: https://$DOMAIN/api/ready)"
-  if [[ -n "$OWNER_EMAIL" ]]; then log "Sign in at https://$DOMAIN/login as $OWNER_EMAIL"
-  else log "Create the owner account NOW at https://$DOMAIN/setup"; fi
+  if curl -fsS --max-time 5 "https://$DOMAIN/api/auth/setup-status" 2>/dev/null | grep -q '"needsSetup":true'; then
+    log "Create the owner account NOW at https://$DOMAIN/setup (until then anyone could claim it)"
+  else
+    log "Sign in at https://$DOMAIN/login"
+  fi
 else
   die "https://$DOMAIN is not answering yet. On the server: cd $INSTALL_DIR && sudo docker compose ps && sudo docker compose logs caddy api"
 fi
