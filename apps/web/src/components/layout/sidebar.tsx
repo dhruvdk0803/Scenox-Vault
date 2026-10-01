@@ -8,6 +8,7 @@ import { ChevronsUpDown, LogOut, Settings } from 'lucide-react';
 import { hasPermission, type MeDTO } from '@scenox/shared';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { NotificationsBell } from '@/components/admin/notifications-bell';
 import { Logo } from '@/components/brand/logo';
 import { Avatar } from '@/components/ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -84,7 +85,7 @@ function UserMenu({ me, onNavigate }: { me: MeDTO; onNavigate?: () => void }) {
 }
 
 /** Sidebar contents (used by both the desktop rail and the mobile drawer). */
-export function SidebarContent({ me, onNavigate }: { me: MeDTO; onNavigate?: () => void }) {
+export function SidebarContent({ me, onNavigate, showBell }: { me: MeDTO; onNavigate?: () => void; showBell?: boolean }) {
   const visible = (items: NavItem[]) => items.filter((i) => !i.permission || hasPermission(me.user.role, i.permission));
   const primary = visible(PRIMARY_NAV);
   const secondary = visible(SECONDARY_NAV);
@@ -94,6 +95,7 @@ export function SidebarContent({ me, onNavigate }: { me: MeDTO; onNavigate?: () 
         <Link href="/dashboard" onClick={onNavigate} className="rounded-md" aria-label="Scenox Vault home">
           <Logo />
         </Link>
+        {showBell && <NotificationsBell className="ml-auto" />}
       </div>
       <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 py-2">
         <ul className="flex flex-col gap-0.5">

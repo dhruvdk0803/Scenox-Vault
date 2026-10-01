@@ -8,6 +8,8 @@ import { Menu, X } from 'lucide-react';
 import type { MeDTO } from '@scenox/shared';
 import { Logo } from '@/components/brand/logo';
 import { Button } from '@/components/ui/button';
+import { BrandingProvider } from '@/components/admin/branding-provider';
+import { NotificationsBell } from '@/components/admin/notifications-bell';
 import { SidebarContent } from './sidebar';
 
 export function AdminShell({ me, children }: { me: MeDTO; children: React.ReactNode }) {
@@ -17,13 +19,14 @@ export function AdminShell({ me, children }: { me: MeDTO; children: React.ReactN
 
   return (
     <div className="min-h-dvh">
+      <BrandingProvider />
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:shadow-md">
         Skip to content
       </a>
 
       {/* Desktop rail */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-border bg-surface lg:block">
-        <SidebarContent me={me} />
+        <SidebarContent me={me} showBell />
       </aside>
 
       {/* Mobile top bar + drawer */}
@@ -52,6 +55,7 @@ export function AdminShell({ me, children }: { me: MeDTO; children: React.ReactN
         <Link href="/dashboard" aria-label="Scenox Vault home" className="rounded-md">
           <Logo />
         </Link>
+        <NotificationsBell className="ml-auto" />
       </div>
 
       <div className="lg:pl-60">
