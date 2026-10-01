@@ -42,8 +42,9 @@ cd "$ROOT"
 [[ -f docker-compose.yml ]] || die "Run this from a Scenox Vault checkout"
 
 SSH=(ssh -p "$SSH_PORT" -o ServerAliveInterval=30)
-# Allocate a TTY only when we have one (laptop: sudo/password prompts work; CI: fully non-interactive).
-if [[ -t 0 ]]; then TTY=(-t); else TTY=(-T); fi
+# Force a remote TTY on a laptop so sudo/password prompts work (also under Windows Git Bash, where
+# stdin may not look like a terminal); CI runs fully non-interactive.
+if [[ -n "${CI:-}${GITHUB_ACTIONS:-}" ]]; then TTY=(-T); else TTY=(-tt); fi
 SCP=(scp -P "$SSH_PORT" -q)
 
 # ── 1. package ───────────────────────────────────────────────────────────────
@@ -65,7 +66,8 @@ log "Connecting to $TARGET (you may be asked for your SSH key passphrase / sudo 
 
 SERVER_IP="$("${SSH[@]}" "$TARGET" "curl -fsS -4 --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print \$1}'")"
 for d in "$DOMAIN" "$UPLOAD_DOMAIN"; do
-  resolved="$( (getent ahostsv4 "$d" 2>/dev/null || true) | awk 'NR==1{print $1}')"
+  # resolved on the server (works from Windows Git Bash / macOS, which lack getent)
+  resolved="$("${SSH[@]}" "$TARGET" "getent ahostsv4 '$d' 2>/dev/null | awk 'NR==1{print \$1}'" || true)"
   if [[ -z "$resolved" ]]; then
     die "$d does not resolve. Create an A record: $d → $SERVER_IP, wait for DNS, then re-run."
   elif [[ "$resolved" != "$SERVER_IP" ]]; then
