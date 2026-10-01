@@ -52,7 +52,8 @@ PKG="$(mktemp -t scenox-vault.XXXXXX).tar.gz"
 trap 'rm -f "$PKG"' EXIT
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   [[ -z "$(git status --porcelain)" ]] || log "Note: uncommitted changes are NOT included (only committed files are deployed)"
-  git archive --format=tar.gz -o "$PKG" HEAD
+  # LF line endings regardless of local Git settings (Windows core.autocrlf would break bash/.env on Linux)
+  git -c core.autocrlf=false archive --format=tar.gz -o "$PKG" HEAD
   VERSION="$(git rev-parse --short HEAD)"
 else
   tar czf "$PKG" --exclude=node_modules --exclude=.next --exclude=dist --exclude=.env --exclude=.data --exclude=.git .
@@ -89,7 +90,7 @@ fi
 # ── 3. upload + unpack ───────────────────────────────────────────────────────
 log "Uploading package"
 "${SCP[@]}" "$PKG" "$TARGET:/tmp/scenox-vault.tar.gz"
-"${SSH[@]}" "${TTY[@]}" "$TARGET" "sudo mkdir -p '$INSTALL_DIR' && sudo tar xzf /tmp/scenox-vault.tar.gz -C '$INSTALL_DIR' && rm -f /tmp/scenox-vault.tar.gz && echo '$VERSION' | sudo tee '$INSTALL_DIR/.deployed-version' >/dev/null"
+"${SSH[@]}" "${TTY[@]}" "$TARGET" "sudo mkdir -p '$INSTALL_DIR' && sudo tar xzf /tmp/scenox-vault.tar.gz -C '$INSTALL_DIR' && rm -f /tmp/scenox-vault.tar.gz && sudo find '$INSTALL_DIR/deploy' '$INSTALL_DIR/.env.example' '$INSTALL_DIR/docker-compose.yml' -type f -exec sed -i 's/\\r\$//' {} + && echo '$VERSION' | sudo tee '$INSTALL_DIR/.deployed-version' >/dev/null"
 
 # ── 4. install / update ──────────────────────────────────────────────────────
 log "Installing on the server (first build takes a few minutes)"

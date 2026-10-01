@@ -1,0 +1,7 @@
+# Always LF in the repository and in checkouts/archives — the code runs on Linux (Docker, bash, Caddy, .env).
+* text=auto eol=lf
+*.sh text eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
