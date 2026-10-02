@@ -2,13 +2,15 @@
 
 import * as React from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { UploadCloud } from 'lucide-react';
+import { Eye, MoreHorizontal, Trash2, UploadCloud } from 'lucide-react';
 import { formatNumber, formatSpeed, type Paginated, type UploadSessionDTO } from '@scenox/shared';
 import { api, qs } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
+import { usePermission } from '@/lib/hooks/use-me';
 import { ALL, fromSelect, useListState } from '@/lib/hooks/use-list-state';
 import { Button } from '@/components/ui/button';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FilterBar } from '@/components/ui/filter-bar';
 import { Pagination } from '@/components/ui/pagination';
@@ -19,6 +21,7 @@ import { ClientSelect, PortalSelect } from '../client-select';
 import { ErrorState } from '../query-state';
 import { RelativeTime } from '../relative-time';
 import { SessionProgress } from '../session-progress';
+import { DeleteUploadDialog } from './delete-upload-dialog';
 import { SessionDetailDialog } from './session-detail-dialog';
 
 const STATUS_OPTIONS = [
@@ -49,6 +52,8 @@ export function UploadsTable({ fixedClientId, fixedPortalId, pageSize = 25, filt
   const [internalId, setInternalId] = React.useState<string | null>(null);
   const openId = onSessionChange ? (sessionId ?? null) : internalId;
   const setOpenId = onSessionChange ?? setInternalId;
+  const canDelete = usePermission('files.delete');
+  const [deleteSession, setDeleteSession] = React.useState<UploadSessionDTO | null>(null);
 
   const params = {
     page: ls.page,
@@ -90,13 +95,30 @@ export function UploadsTable({ fixedClientId, fixedPortalId, pageSize = 25, filt
     { key: 'startedAt', header: 'Started', cell: (s) => <RelativeTime date={s.startedAt} className="whitespace-nowrap tabular-nums text-fg-muted" /> },
     {
       key: 'view',
-      header: <span className="sr-only">Details</span>,
+      header: <span className="sr-only">Actions</span>,
       align: 'right',
-      className: 'w-16',
+      className: canDelete ? 'w-28' : 'w-16',
       cell: (s) => (
-        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setOpenId(s.id); }} aria-label={`View upload session from ${s.clientName}`}>
-          View
-        </Button>
+        // React events bubble through portals: keep menu clicks from also opening the row.
+        <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <Button variant="ghost" size="sm" onClick={() => setOpenId(s.id)} aria-label={`View upload session from ${s.clientName}`}>
+            View
+          </Button>
+          {canDelete && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="size-8" aria-label={`More actions for upload from ${s.clientName}`}>
+                  <MoreHorizontal aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setOpenId(s.id)}><Eye aria-hidden /> View details</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem destructive onSelect={() => setDeleteSession(s)}><Trash2 aria-hidden /> Delete upload</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       ),
     },
   ];
@@ -139,6 +161,7 @@ export function UploadsTable({ fixedClientId, fixedPortalId, pageSize = 25, filt
         </>
       )}
       <SessionDetailDialog sessionId={openId} onOpenChange={(o) => !o && setOpenId(null)} />
+      <DeleteUploadDialog session={deleteSession} onOpenChange={(o) => !o && setDeleteSession(null)} />
     </div>
   );
 }

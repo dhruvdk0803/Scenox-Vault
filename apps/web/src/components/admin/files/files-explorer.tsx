@@ -62,6 +62,7 @@ function AllFiles() {
     queryFn: ({ signal }) => api.get<Paginated<FileDTO>>(`/files${qs(params)}`, { signal }),
     placeholderData: keepPreviousData,
   });
+  const fetchMatching = (pg: number, pageSize: number) => api.get<Paginated<FileDTO>>(`/files${qs({ ...params, page: pg, pageSize })}`);
   const hasFilter = !!(ls.q || filters.clientId || filters.portalId || filters.type || filters.status || filters.date || filters.minSize);
 
   return (
@@ -104,7 +105,13 @@ function AllFiles() {
           )}
         </>
       )}
-      <FileBulkBar selectedIds={selected} onClear={() => setSelected(new Set())} />
+      <FileBulkBar
+        selectedIds={selected}
+        onClear={() => setSelected(new Set())}
+        onSelectionChange={setSelected}
+        files={data?.items}
+        matching={data ? { total: data.total, fetchPage: fetchMatching } : undefined}
+      />
     </div>
   );
 }

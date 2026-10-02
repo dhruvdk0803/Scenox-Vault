@@ -4,11 +4,13 @@ import * as React from 'react';
 import Link from 'next/link';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { differenceInSeconds } from 'date-fns';
-import { FileX2 } from 'lucide-react';
+import { FileX2, Trash2 } from 'lucide-react';
 import { formatBytes, formatDuration, formatNumber, formatSpeed, type FileDTO, type Paginated, type UploadSessionDTO } from '@scenox/shared';
 import { api, qs } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { usePermission } from '@/lib/hooks/use-me';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Pagination } from '@/components/ui/pagination';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,6 +19,7 @@ import { FileTable } from '../files/file-table';
 import { ErrorState } from '../query-state';
 import { formatDateTime } from '../relative-time';
 import { SessionProgress } from '../session-progress';
+import { DeleteUploadDialog } from './delete-upload-dialog';
 
 function Item({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -31,6 +34,8 @@ const dash = <span className="text-fg-subtle">—</span>;
 
 export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: string | null; onOpenChange: (open: boolean) => void }) {
   const [page, setPage] = React.useState(1);
+  const canDelete = usePermission('files.delete');
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
   React.useEffect(() => setPage(1), [sessionId]);
 
   const { data: s, isPending, error, refetch, isFetching } = useQuery({
@@ -53,6 +58,7 @@ export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: st
   const duration = s ? differenceInSeconds(new Date(s.completedAt ?? s.lastActivityAt), new Date(s.startedAt)) : null;
 
   return (
+    <>
     <Dialog open={!!sessionId} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
@@ -122,7 +128,17 @@ export function SessionDetailDialog({ sessionId, onOpenChange }: { sessionId: st
             </div>
           </div>
         )}
+        {s && canDelete && (
+          <DialogFooter className="border-t border-border pt-4 sm:justify-between">
+            <p className="text-xs text-fg-subtle sm:self-center">Stuck or abandoned? Deleting removes this upload and all of its files.</p>
+            <Button variant="outline" className="text-danger hover:text-danger" onClick={() => setDeleteOpen(true)}>
+              <Trash2 aria-hidden /> Delete upload
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
+    <DeleteUploadDialog session={deleteOpen ? (s ?? null) : null} onOpenChange={(o) => !o && setDeleteOpen(false)} onDeleted={() => { setDeleteOpen(false); onOpenChange(false); }} />
+    </>
   );
 }

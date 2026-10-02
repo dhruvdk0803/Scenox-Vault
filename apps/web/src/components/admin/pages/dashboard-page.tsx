@@ -4,8 +4,8 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Activity, ArrowRight, Database, Download, FileText, Link2, MessagesSquare, Plus, UploadCloud, Users, Zap } from 'lucide-react';
-import { formatBytes, formatNumber, type DashboardDTO } from '@scenox/shared';
+import { Activity, ArrowRight, Database, Download, FileText, Link2, MessagesSquare, MoreHorizontal, Plus, Trash2, UploadCloud, Users, Zap } from 'lucide-react';
+import { formatBytes, formatNumber, type DashboardDTO, type UploadSessionDTO } from '@scenox/shared';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
 import { useMe, usePermission } from '@/lib/hooks/use-me';
@@ -13,6 +13,7 @@ import { useUnreadMessages } from '@/lib/hooks/use-messages';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/ui/page-header';
 import { StatCard } from '@/components/ui/stat-card';
@@ -24,6 +25,7 @@ import { InsightsSection } from '../dashboard/insights';
 import { ErrorState } from '../query-state';
 import { RelativeTime } from '../relative-time';
 import { SessionProgress } from '../session-progress';
+import { DeleteUploadDialog } from '../uploads/delete-upload-dialog';
 import { StorageBanner } from '../storage-banner';
 
 function greeting(now: Date | null): string {
@@ -49,6 +51,8 @@ export function DashboardPage() {
   const canPortals = usePermission('portals.manage');
   const canActivity = usePermission('activity.view');
   const canViewPortals = usePermission('portals.view');
+  const canDeleteUploads = usePermission('files.delete');
+  const [deleteSession, setDeleteSession] = React.useState<UploadSessionDTO | null>(null);
   const unreadMessages = useUnreadMessages(canViewPortals);
   const { data, isPending, error, refetch, isFetching } = useQuery({
     queryKey: queryKeys.dashboard,
@@ -129,8 +133,8 @@ export function DashboardPage() {
                 ) : (
                   <ul className="divide-y divide-border">
                     {data!.recentSessions.slice(0, 6).map((s) => (
-                      <li key={s.id}>
-                        <Link href={`/uploads?session=${s.id}`} className="-mx-2 grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1.5 rounded-md px-2 py-3 transition-colors hover:bg-surface-muted/60 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,12rem)_auto]">
+                      <li key={s.id} className="flex items-center gap-1">
+                        <Link href={`/uploads?session=${s.id}`} className="-ml-2 grid min-w-0 flex-1 grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1.5 rounded-md px-2 py-3 transition-colors hover:bg-surface-muted/60 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,12rem)_auto]">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium text-fg">{s.clientName}</p>
                             <p className="truncate text-xs text-fg-subtle">
@@ -143,6 +147,18 @@ export function DashboardPage() {
                             <RelativeTime date={s.startedAt} className="text-xs tabular-nums text-fg-subtle" />
                           </div>
                         </Link>
+                        {canDeleteUploads && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={`Actions for upload from ${s.clientName}`}>
+                                <MoreHorizontal aria-hidden />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem destructive onSelect={() => setDeleteSession(s)}><Trash2 aria-hidden /> Delete upload</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -190,6 +206,7 @@ export function DashboardPage() {
       )}
 
       {canActivity && <InsightsSection />}
+      <DeleteUploadDialog session={deleteSession} onOpenChange={(o) => !o && setDeleteSession(null)} />
     </>
   );
 }

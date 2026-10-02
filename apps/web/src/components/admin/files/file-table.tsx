@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Download, FolderInput, Info, MoreHorizontal, Pencil, Trash2, ClipboardCopy } from 'lucide-react';
+import { Download, Eye, FolderInput, Info, MoreHorizontal, Pencil, Trash2, ClipboardCopy } from 'lucide-react';
 import { formatBytes, type FileDTO } from '@scenox/shared';
 import { api, errorMessage } from '@/lib/api';
 import { usePermission } from '@/lib/hooks/use-me';
@@ -13,6 +13,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { toast } from '@/components/ui/toaster';
 import { RelativeTime } from '../relative-time';
 import { FileDetailsDialog } from './file-details-dialog';
+import { FilePreview } from './file-preview';
 import { MoveFilesDialog, RenameFileDialog, useInvalidateFiles } from './file-dialogs';
 import { downloadUrl, FileTypeIcon, filePath } from './file-utils';
 
@@ -42,11 +43,16 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
   const [renameFile, setRenameFile] = React.useState<FileDTO | null>(null);
   const [moveFile, setMoveFile] = React.useState<FileDTO | null>(null);
   const [deleteFile, setDeleteFile] = React.useState<FileDTO | null>(null);
+  const [previewId, setPreviewId] = React.useState<string | null>(null);
 
   const openDetails = (f: FileDTO) => {
     setDetailInitial(f);
     setDetailId(f.id);
   };
+
+  /** Opens the lightbox (needs download rights, since it streams the file); otherwise falls back to the details dialog. */
+  const openFile = (f: FileDTO) => (canDownload ? setPreviewId(f.id) : openDetails(f));
+  const closePreview = React.useCallback(() => setPreviewId(null), []);
 
   async function copyPath(f: FileDTO) {
     try {
@@ -67,7 +73,7 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
         <div className="flex min-w-0 items-center gap-2.5">
           <FileTypeIcon extension={f.extension} className="size-4 shrink-0 text-fg-subtle" />
           <div className="min-w-0">
-            <button type="button" onClick={() => openDetails(f)} className="block max-w-full truncate rounded-sm text-left font-medium text-fg hover:underline" title={f.name}>
+            <button type="button" onClick={(e) => { e.stopPropagation(); openFile(f); }} className="block max-w-full truncate rounded-sm text-left font-medium text-fg hover:underline" title={f.name}>
               {f.name}
             </button>
             {f.relativePath && <p className="truncate text-xs text-fg-subtle" title={f.relativePath}>{f.relativePath}</p>}
@@ -115,6 +121,8 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
       align: 'right',
       className: 'w-12',
       cell: (f) => (
+        // React events bubble through portals: stop menu clicks from also triggering the row's preview.
+        <div onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="size-8" aria-label={`Actions for ${f.name}`}>
@@ -122,6 +130,7 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {canDownload && <DropdownMenuItem onSelect={() => setPreviewId(f.id)}><Eye aria-hidden /> Preview</DropdownMenuItem>}
             <DropdownMenuItem onSelect={() => openDetails(f)}><Info aria-hidden /> View details</DropdownMenuItem>
             {canDownload && (
               <DropdownMenuItem asChild disabled={f.status === 'quarantined'}>
@@ -144,6 +153,7 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       ),
     },
   ];
@@ -162,7 +172,9 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
         onSelectionChange={onSelectionChange}
         sort={sort}
         onSortChange={onSortChange}
+        onRowClick={openFile}
       />
+      <FilePreview files={files} fileId={previewId} onFileChange={setPreviewId} onClose={closePreview} onOpenDetails={openDetails} />
       <FileDetailsDialog fileId={detailId} initial={detailInitial} onOpenChange={(o) => !o && setDetailId(null)} />
       <RenameFileDialog file={renameFile} onOpenChange={(o) => !o && setRenameFile(null)} />
       <MoveFilesDialog open={!!moveFile} onOpenChange={(o) => !o && setMoveFile(null)} fileIds={moveFile ? [moveFile.id] : []} initialPath={moveFile?.relativePath} />
