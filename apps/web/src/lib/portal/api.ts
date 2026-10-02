@@ -34,6 +34,7 @@ export const clientApi = {
     ),
   uploads: (token: string, signal?: AbortSignal) => api.get<ClientUploadDTO[]>(`${base(token)}/uploads`, opts(token, signal)),
   deleteFile: (token: string, fileId: string) => api.delete<void>(`${base(token)}/files/${encodeURIComponent(fileId)}`, undefined, opts(token)),
+  deleteFiles: (token: string, fileIds: string[]) => api.post<{ deleted: number }>(`${base(token)}/files/delete`, { fileIds }, opts(token)),
   messages: (token: string, q: { fileId?: string | null; before?: string | null; limit?: number }, signal?: AbortSignal) =>
     api.get<MessageListResponse>(`${base(token)}/messages${qs({ fileId: q.fileId, before: q.before, limit: q.limit })}`, opts(token, signal)),
   postMessage: (token: string, body: PostClientMessageRequest) => api.post<MessageDTO>(`${base(token)}/messages`, body, opts(token)),

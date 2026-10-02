@@ -5,6 +5,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClie
 import type { ClientDashboardDTO, MessageDTO, MessageListResponse, PostClientMessageRequest } from '@scenox/shared';
 import { ApiClientError } from '@/lib/api';
 import { usePortal } from '@/components/portal/portal-context';
+import { deleteInChunks } from './bulk';
 import { clientApi, type BrowseParams } from './api';
 import { portalKeys } from './keys';
 import { mergeMessages } from './messages';
@@ -71,6 +72,22 @@ export function useDeleteFile() {
     mutationFn: (fileId: string) => clientApi.deleteFile(token, fileId),
     onSuccess: () => invalidatePortalData(qc, token),
   });
+}
+
+/** Bulk delete (selection / whole folder); refreshes dashboard, listings and upload history when done or part-way failed. */
+export function useDeleteFiles() {
+  const { token } = usePortal();
+  const qc = useQueryClient();
+  return React.useCallback(
+    async (ids: readonly string[], onProgress?: (done: number, total: number) => void) => {
+      try {
+        return await deleteInChunks((part) => clientApi.deleteFiles(token, part), ids, onProgress);
+      } finally {
+        invalidatePortalData(qc, token);
+      }
+    },
+    [token, qc],
+  );
 }
 
 const PAGE = 50;

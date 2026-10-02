@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import type { Branding, PublicPortalDTO } from '@scenox/shared';
+import type { Branding, ClientFileDTO, PublicPortalDTO } from '@scenox/shared';
 import type { PortalTab } from '@/lib/portal/tabs';
 
 export type Portal = NonNullable<PublicPortalDTO['portal']>;
@@ -46,6 +46,8 @@ export interface PortalContextValue {
   view: UrlView;
   navigate: (patch: NavPatch, mode?: 'push' | 'replace') => void;
   openFileComments: (f: FileRef) => void;
+  /** Opens the full-screen viewer on `fileId`; ←/→ move through `files` (the list currently on screen). */
+  openPreview: (files: ClientFileDTO[], fileId: string) => void;
 }
 
 const Ctx = React.createContext<PortalContextValue | null>(null);

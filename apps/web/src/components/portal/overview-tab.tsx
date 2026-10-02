@@ -227,7 +227,7 @@ function RecentUploads({ uploads, canViewAll }: { uploads: ClientUploadDTO[]; ca
 }
 
 function RecentFiles({ files }: { files: ClientFileDTO[] }) {
-  const { navigate, canMessage, openFileComments } = usePortal();
+  const { navigate, canMessage, openFileComments, openPreview } = usePortal();
   return (
     <Section title="Recent files" action={files.length > 0 ? <LinkButton onClick={() => navigate({ tab: 'files' })}>Browse all files</LinkButton> : undefined}>
       {files.length === 0 ? (
@@ -238,14 +238,19 @@ function RecentFiles({ files }: { files: ClientFileDTO[] }) {
             const Icon = categoryMeta(f.type).icon;
             return (
               <li key={f.id} className="flex items-center gap-3 px-5 py-2.5">
-                <FileTile icon={Icon} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-fg" title={f.name}>{f.name}</p>
-                  <p className="truncate text-xs tabular-nums text-fg-muted">
-                    {formatBytes(f.size)} · {whenShort(f.uploadedAt)}
-                    {f.uploadedBy ? ` · ${f.uploadedBy}` : ''}
-                  </p>
-                </div>
+                <button
+                  type="button" onClick={() => openPreview(files, f.id)} aria-label={`Preview ${f.name}`}
+                  className="-m-1 flex min-w-0 flex-1 items-center gap-3 rounded-md p-1 text-left transition-colors hover:bg-surface-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
+                >
+                  <FileTile icon={Icon} />
+                  <span className="block min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-fg" title={f.name}>{f.name}</span>
+                    <span className="block truncate text-xs tabular-nums text-fg-muted">
+                      {formatBytes(f.size)} · {whenShort(f.uploadedAt)}
+                      {f.uploadedBy ? ` · ${f.uploadedBy}` : ''}
+                    </span>
+                  </span>
+                </button>
                 {f.status !== 'ready' && <StatusBadge kind="file" status={f.status} className="hidden sm:inline-flex" />}
                 {canMessage && (
                   <button

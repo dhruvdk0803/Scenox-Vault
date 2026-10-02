@@ -3,11 +3,12 @@
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Branding, UploadEngineConfig } from '@scenox/shared';
+import type { Branding, ClientFileDTO, UploadEngineConfig } from '@scenox/shared';
 import { invalidatePortalData, useDashboard } from '@/lib/portal/hooks';
 import { availableTabs, parseTab, TAB_LABELS, type PortalTab } from '@/lib/portal/tabs';
 import { brandStyle } from './branding';
 import { CommentsSheet } from './comments-sheet';
+import { FilePreview } from './file-preview';
 import { FilesTab } from './files-tab';
 import { DashboardHeader, UploadPill } from './header';
 import { MessagesTab } from './messages-tab';
@@ -99,9 +100,23 @@ export function PortalDashboard({
   const [commentFile, setCommentFile] = React.useState<FileRef | null>(null);
   const openFileComments = React.useCallback((f: FileRef) => setCommentFile(f), []);
 
+  const [preview, setPreview] = React.useState<{ files: ClientFileDTO[]; index: number } | null>(null);
+  const openPreview = React.useCallback((files: ClientFileDTO[], fileId: string) => {
+    const index = files.findIndex((f) => f.id === fileId);
+    if (index >= 0) setPreview({ files, index });
+  }, []);
+  // navigating elsewhere (e.g. "Show in Files" from the comments sheet) closes the viewer
+  React.useEffect(() => {
+    setPreview(null);
+  }, [view.tab, view.path, view.q]);
+  // the viewer only makes sense while files are visible to the client
+  React.useEffect(() => {
+    if (!canViewFiles) setPreview(null);
+  }, [canViewFiles]);
+
   const ctx = React.useMemo(
-    () => ({ token, portal, branding, canViewFiles, canDelete, canMessage, hideFeature, accessLost, reloadPortal: onReload, view, navigate, openFileComments }),
-    [token, portal, branding, canViewFiles, canDelete, canMessage, hideFeature, accessLost, onReload, view, navigate, openFileComments],
+    () => ({ token, portal, branding, canViewFiles, canDelete, canMessage, hideFeature, accessLost, reloadPortal: onReload, view, navigate, openFileComments, openPreview }),
+    [token, portal, branding, canViewFiles, canDelete, canMessage, hideFeature, accessLost, onReload, view, navigate, openFileComments, openPreview],
   );
 
   return (
@@ -123,6 +138,13 @@ export function PortalDashboard({
           upload.setPlan(null);
         }}
       />
+      {preview && (
+        <FilePreview
+          files={preview.files} index={preview.index}
+          onIndexChange={(index) => setPreview((p) => (p ? { ...p, index } : p))}
+          onClose={() => setPreview(null)}
+        />
+      )}
       {canMessage && <CommentsSheet file={commentFile} onClose={() => setCommentFile(null)} />}
     </PortalProvider>
   );
