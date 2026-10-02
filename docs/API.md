@@ -60,6 +60,7 @@ All request/response types live in [`packages/shared/src/types.ts`](../packages/
 |---|---|---|---|
 | GET | `/api/uploads` | files.view | `?clientId=&portalId=&status=&q=` → `Paginated<UploadSessionDTO>` |
 | GET | `/api/uploads/:id` | files.view | → `UploadSessionDTO` |
+| DELETE | `/api/uploads/:id` | files.delete | deletes the upload and all its files (any status, incl. in-progress transfers) → 204 |
 
 ## Files
 
@@ -135,6 +136,8 @@ Paths are relative to `/api/public/portals/:token`. They need `x-portal-access` 
 | GET | `/browse` | allowClientViewFiles | `?path=&q=&type=&sort=name\|size\|uploadedAt&order=&page=&pageSize=` → `ClientBrowseResponse` (all files of this portal) |
 | GET | `/uploads` | allowClientViewFiles | upload history → `ClientUploadDTO[]` (newest first, ≤ 100) |
 | DELETE | `/files/:fileId` | allowClientDeleteFiles | any file of this portal |
+| POST | `/files/delete` | allowClientDeleteFiles | `{ fileIds: string[] }` (1–1000) → `{ deleted }`; only this portal's ready/processing files |
+| GET | `/files/:fileId/preview` | allowClientViewFiles | inline stream (images except SVG, video, audio, PDF, text) with Range support; `?access=<token>` accepted for password portals (media tags can't send headers); other types → 415 |
 | GET | `/messages` | allowClientMessages | `?fileId=&before=&limit=` → `MessageListResponse`; marks staff messages read |
 | POST | `/messages` | allowClientMessages | `PostClientMessageRequest` → `MessageDTO` (rate limited 20/min/IP; notifies the team) |
 

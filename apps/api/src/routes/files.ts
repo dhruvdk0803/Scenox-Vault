@@ -15,7 +15,7 @@ const idParam = z.object({ id: z.uuid() });
 const idsBody = (max: number) => z.object({ fileIds: z.array(z.uuid()).min(1, 'Select at least one file.').max(max, `Please select at most ${max} files at a time.`) });
 
 /** Inline preview is only allowed for types that cannot run script in the app's origin. */
-const INLINE_SAFE = (mime: string) =>
+export const INLINE_SAFE = (mime: string) =>
   (/^image\/(?!svg)/.test(mime) && !/^image\/svg/.test(mime)) || mime === 'application/pdf' || /^video\//.test(mime) || /^audio\//.test(mime) || mime === 'text/plain';
 
 export function parseRange(header: string | undefined, size: number): { start: number; end: number } | 'invalid' | null {
@@ -165,7 +165,7 @@ export default async function filesRoutes(app: FastifyInstance) {
   });
 }
 
-async function streamStoredFile(req: FastifyRequest, reply: FastifyReply, f: FileRow, key: string, wantInline: boolean) {
+export async function streamStoredFile(req: FastifyRequest, reply: FastifyReply, f: FileRow, key: string, wantInline: boolean, opts: { audit?: boolean } = {}) {
   const storage = getStorage();
   const meta = await storage.getMetadata(key);
   if (!meta) throw new AppError(410, 'file_missing', 'This file is no longer available on the server.');
@@ -194,7 +194,7 @@ async function streamStoredFile(req: FastifyRequest, reply: FastifyReply, f: Fil
     reply.header('content-length', size);
   }
 
-  if (!range || range.start === 0) {
+  if (opts.audit !== false && (!range || range.start === 0)) {
     await audit(req, {
       action: 'file.downloaded',
       resourceType: 'file',

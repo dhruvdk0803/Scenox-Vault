@@ -19,7 +19,8 @@ import { AppError, forbidden, notFound, validationError } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { enqueue } from '../queue';
 import { browseClientFiles, buildClientDashboard, clientBrowseQuerySchema, listClientUploads, loadUsablePortal } from '../services/client-portal';
-import { deleteFiles } from '../services/files';
+import { currentStorageKey, deleteFiles } from '../services/files';
+import { INLINE_SAFE, streamStoredFile } from './files';
 import {
   createClientMessage,
   getMessageDTO,
@@ -279,6 +280,48 @@ export default async function publicRoutes(app: FastifyInstance) {
       });
     }
     return reply.code(204).send();
+  });
+
+  // Bulk delete (client dashboard selection / folder delete)
+  app.post('/portals/:token/files/delete', limit(60), async (req) => {
+    const params = parse(z.object({ token: z.string().max(200) }), req.params);
+    const body = parse(z.object({ fileIds: z.array(z.uuid()).min(1).max(1000) }), req.body);
+    const { portal: p, client } = await loadUsablePortal(req, params.token);
+    if (!p.allowClientDeleteFiles) throw forbidden('Deleting files is not enabled for this upload link.');
+    const rows = await getDb()
+      .select({ id: files.id })
+      .from(files)
+      .where(and(eq(files.portalId, p.id), inArray(files.id, [...new Set(body.fileIds)]), inArray(files.status, ['ready', 'processing'])));
+    const deleted = await deleteFiles(rows.map((r) => r.id));
+    if (deleted.length) {
+      await clientActivity(req, {
+        action: 'file.deleted_by_client',
+        resourceType: 'portal',
+        resourceId: p.id,
+        clientId: client.id,
+        portalId: p.id,
+        actorLabel: client.name,
+        metadata: { count: deleted.length, bytes: deleted.reduce((n, f) => n + Number(f.size), 0) },
+      });
+    }
+    return { deleted: deleted.length };
+  });
+
+  // Inline preview for the client dashboard (images, video, audio, PDF, text). Range requests supported.
+  app.get('/portals/:token/files/:fileId/preview', async (req, reply) => {
+    const params = parse(z.object({ token: z.string().max(200), fileId: z.string().max(64) }), req.params);
+    const { access } = parse(z.object({ access: z.string().max(128).optional() }), req.query);
+    const { portal: p } = await loadUsablePortal(req, params.token, access);
+    if (!p.allowClientViewFiles) throw new AppError(403, 'files_hidden', 'Viewing files is not enabled for this upload link.');
+    if (!z.uuid().safeParse(params.fileId).success) throw notFound('File not found.');
+    const [f] = await getDb().select().from(files).where(and(eq(files.id, params.fileId), eq(files.portalId, p.id))).limit(1);
+    if (!f) throw notFound('File not found.');
+    if (f.status !== 'ready') throw new AppError(409, 'file_not_ready', 'This file isn’t ready to preview yet.');
+    const mime = (f.detectedMime ?? f.mimeType ?? '').toLowerCase();
+    if (!INLINE_SAFE(mime)) throw new AppError(415, 'preview_unavailable', 'Preview isn’t available for this file type.');
+    const key = currentStorageKey(f);
+    if (!key) throw notFound('File not found.');
+    return streamStoredFile(req, reply, f, key, true, { audit: false });
   });
 
   // ───────────── client dashboard (no upload session needed) ─────────────

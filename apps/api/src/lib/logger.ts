@@ -17,7 +17,10 @@ export const REDACT_PATHS = [
 
 /** Strip portal tokens from URLs before logging: /api/public/portals/<token>/… → /api/public/portals/[token]/… */
 export function redactUrl(url: string): string {
-  return url.replace(/(\/public\/portals\/)[^/?#]+/, '$1[token]').replace(/(\/u\/)[^/?#]+/, '$1[token]');
+  return url
+    .replace(/(\/public\/portals\/)[^/?#]+/, '$1[token]')
+    .replace(/(\/u\/)[^/?#]+/, '$1[token]')
+    .replace(/([?&]access=)[^&#]+/, '$1[redacted]');
 }
 
 export const logger = pino({

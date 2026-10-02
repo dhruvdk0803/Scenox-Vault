@@ -6,7 +6,8 @@ import { getDb } from '../db';
 import { clients, files, portals, uploadSessions } from '../db/schema';
 import { notFound } from '../lib/errors';
 import { parse } from '../lib/validate';
-import { escapeLike } from '../services/files';
+import { audit } from '../lib/activity';
+import { deleteFiles, escapeLike } from '../services/files';
 import { toUploadSessionDTO } from '../services/mappers';
 
 const listSchema = z.object({
@@ -88,5 +89,33 @@ export default async function uploadRoutes(app: FastifyInstance) {
       .limit(1);
     if (!row) throw notFound('Upload session not found.');
     return (await withLiveBytes([row]))[0];
+  });
+
+  /**
+   * Delete an upload (batch) entirely: cancels in-progress transfers, removes every file of the
+   * session (any status, incl. partial tus data) and the session itself. Used for stuck/abandoned
+   * uploads (e.g. the client's laptop shut down mid-transfer) — the client can simply upload again.
+   */
+  app.delete('/:id', { preHandler: app.requirePermission('files.delete') }, async (req, reply) => {
+    const { id } = parse(z.object({ id: z.uuid() }), req.params);
+    const db = getDb();
+    const [s] = await db.select().from(uploadSessions).where(eq(uploadSessions.id, id)).limit(1);
+    if (!s) throw notFound('Upload session not found.');
+    const ids = (await db.select({ id: files.id }).from(files).where(eq(files.uploadSessionId, id))).map((r) => r.id);
+    const deleted = await deleteFiles(ids);
+    await db.transaction(async (tx) => {
+      await tx.delete(uploadSessions).where(eq(uploadSessions.id, id));
+      await tx.execute(sql`update portals set session_count = greatest(session_count - 1, 0), updated_at = now() where id = ${s.portalId}`);
+      await tx.execute(sql`update clients set upload_count = greatest(upload_count - 1, 0), updated_at = now() where id = ${s.clientId}`);
+    });
+    await audit(req, {
+      action: 'upload.deleted',
+      resourceType: 'upload_session',
+      resourceId: id,
+      clientId: s.clientId,
+      portalId: s.portalId,
+      metadata: { count: deleted.length, bytes: deleted.reduce((n, f) => n + Number(f.size), 0), status: s.status },
+    });
+    return reply.code(204).send();
   });
 }

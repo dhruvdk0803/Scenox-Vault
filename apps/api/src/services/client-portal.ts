@@ -29,10 +29,10 @@ const MAX_UPLOADS = 100;
  * Resolve the portal of a public token and make sure the visitor may use it: unknown token → 404,
  * disabled / expired → 403, password protected without a valid x-portal-access → 401.
  */
-export async function loadUsablePortal(req: FastifyRequest, token: string): Promise<{ portal: Portal; client: Client }> {
+export async function loadUsablePortal(req: FastifyRequest, token: string, accessQuery?: string): Promise<{ portal: Portal; client: Client }> {
   const { portal, client } = await loadPortalByToken(token);
   assertPortalUsable(portal, client);
-  if (!(await hasPortalAccess(portal, req))) {
+  if (!(await hasPortalAccess(portal, req, accessQuery))) {
     throw new AppError(401, 'password_required', 'This upload link is password protected. Please enter the password to continue.');
   }
   return { portal, client };

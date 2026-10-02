@@ -59,9 +59,11 @@ export function assertPortalUsable(portal: Pick<Portal, 'status' | 'expiresAt'>,
 }
 
 /** True when the request carries a valid, unexpired portal access token for this portal. */
-export async function hasPortalAccess(portal: Pick<Portal, 'id' | 'passwordHash'>, req: FastifyRequest): Promise<boolean> {
+export async function hasPortalAccess(portal: Pick<Portal, 'id' | 'passwordHash'>, req: FastifyRequest, queryToken?: string): Promise<boolean> {
   if (!portal.passwordHash) return true;
-  const token = req.headers[PORTAL_ACCESS_HEADER];
+  // media tags (<img>/<video>) can't send headers, so preview URLs may carry the token as ?access=
+  const header = req.headers[PORTAL_ACCESS_HEADER];
+  const token = typeof header === 'string' ? header : queryToken;
   if (typeof token !== 'string' || token.length < 16 || token.length > 128) return false;
   const [row] = await getDb()
     .select({ id: portalAccessTokens.id })

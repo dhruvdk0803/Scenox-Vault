@@ -181,6 +181,7 @@ export function activitySummary(a: Pick<ActivityLog, 'action' | 'actorLabel' | '
     'portal.unlocked': `${who} unlocked the portal`,
     'upload.started': `${who} started an upload session`,
     'upload.completed': `${who} uploaded ${m.files ?? ''} files`.replace('  ', ' '),
+    'upload.deleted': `Deleted an upload (${m.count ?? 0} files)`,
     'upload.failed': `Upload failed${name ? `: ${name}` : ''}`,
     'file.uploaded': `Uploaded ${name}`,
     'file.quarantined': `File ${name} quarantined`,
