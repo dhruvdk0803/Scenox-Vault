@@ -73,6 +73,9 @@ const EnvSchema = z.object({
 
   RATE_LIMIT_ENABLED: bool.prefault('true'),
   WORKER_CONCURRENCY: z.coerce.number().int().default(2),
+
+  /** Allow webhook deliveries to private/loopback addresses (SSRF protection off). Development/tests only. */
+  WEBHOOK_ALLOW_PRIVATE: bool.prefault('false'),
 });
 
 export type AppConfig = ReturnType<typeof loadConfig>;
@@ -138,6 +141,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     clamav: { enabled: e.CLAMAV_ENABLED, host: e.CLAMAV_HOST, port: e.CLAMAV_PORT },
     rateLimitEnabled: e.RATE_LIMIT_ENABLED,
     workerConcurrency: e.WORKER_CONCURRENCY,
+    webhookAllowPrivate: e.WEBHOOK_ALLOW_PRIVATE,
     version: process.env.npm_package_version ?? '1.0.0',
   };
 }

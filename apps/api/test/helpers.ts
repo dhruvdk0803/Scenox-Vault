@@ -30,7 +30,7 @@ export async function setupTestApp(): Promise<FastifyInstance> {
 export async function resetDatabase() {
   await getDb().execute(sql`
     TRUNCATE users, sessions, clients, portals, portal_access_tokens, upload_sessions, files,
-             export_jobs, activity_logs, notifications, settings RESTART IDENTITY CASCADE`);
+             export_jobs, activity_logs, notifications, settings, api_keys, webhooks, webhook_deliveries RESTART IDENTITY CASCADE`);
 }
 
 export const ORIGIN = { origin: 'http://localhost:3000' };

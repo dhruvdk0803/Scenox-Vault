@@ -9,7 +9,9 @@ import { logActivity } from '../lib/activity';
 import { logger } from '../lib/logger';
 import { KEYS, getStorage } from '../storage';
 import { appLink, notifyAdmins } from '../services/notifications';
+import { getFileDTO } from '../services/files';
 import { scanWithClamd } from '../services/scanner';
+import { emitEvent } from '../services/webhooks';
 import { bumpCounters } from '../services/uploads';
 
 const SNIFF_BYTES = 4100;
@@ -147,6 +149,13 @@ export async function processFile(fileId: string): Promise<void> {
       clientId: f.clientId,
       uploadSessionId: f.uploadSessionId,
     }).catch((err) => logger.error({ err, fileId }, 'failed to notify about quarantined file'));
+  }
+
+  // webhooks: file.ready / file.quarantined (never throws; a failure here must not retry the job)
+  try {
+    await emitEvent(infected ? 'file.quarantined' : 'file.ready', await getFileDTO(fileId), { clientId: f.clientId });
+  } catch (err) {
+    logger.error({ err, fileId }, 'failed to emit file webhook');
   }
 }
 

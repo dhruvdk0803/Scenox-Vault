@@ -4,6 +4,7 @@ Base path: `/api` (same origin as the web app; Caddy routes `/api/*` to the API 
 All request/response types live in [`packages/shared/src/types.ts`](../packages/shared/src/types.ts).
 
 - **Auth (admin):** HttpOnly cookie `sv_session` set by `POST /api/auth/login`. State-changing requests must come from an allowed `Origin` (CSRF defence).
+- **Auth (API keys / integrations):** `Authorization: Bearer svk_…` (or `x-api-key`), scopes `read`/`write`, 600 requests/min per key, no CSRF/Origin check. Full guide: [`DEVELOPER_API.md`](./DEVELOPER_API.md), also served at `GET /api/docs`.
 - **Auth (public portal):** the portal token in the URL path, plus optional `x-portal-access` (password-protected portals) and `x-upload-session` (upload batch) headers.
 - **Errors:** `{ "error": { "code": string, "message": string, "details"?: any, "requestId"?: string } }` — `message` is always safe to show to end users.
 - **Lists:** `?page=1&pageSize=25&q=&sort=&order=asc|desc` → `Paginated<T>` (`{ items, total, page, pageSize }`).
@@ -66,11 +67,13 @@ All request/response types live in [`packages/shared/src/types.ts`](../packages/
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/api/files` | files.view | `FileListQuery` → `Paginated<FileDTO>` (server-side search on filename/path) |
+| GET | `/api/files` | files.view | `FileListQuery` → `Paginated<FileDTO>` (server-side search on filename/path; filters `tag`, `notTag`, `since`; `sort=completedAt`) |
 | GET | `/api/files/browse` | files.view | `?clientId=(required)&portalId=&path=&page=&q=` → `BrowseResponse` (folders derived from `relativePath`) |
 | GET | `/api/files/:id` | files.view | → `FileDTO` |
 | GET | `/api/files/:id/download` | files.download | streams the file; supports `Range`; `?inline=1` for preview of safe types. Quarantined files refused. |
-| PATCH | `/api/files/:id` | files.manage | `RenameFileRequest` → `FileDTO` (metadata rename; disk key unchanged) |
+| PATCH | `/api/files/:id` | files.manage | `UpdateFileRequest` (`name`, `tags`, `addTags`, `removeTags`, `meta` shallow-merge, null deletes) → `FileDTO` (rename is metadata only; disk key unchanged) |
+| POST | `/api/files/tags` | files.manage | `BulkTagRequest` (≤ 1000 ids) → `{ updated }` |
+| POST | `/api/files/:id/signed-url` | files.download | `SignedUrlRequest` → `SignedUrlResponse` (public, time-limited URL; file must be ready) |
 | POST | `/api/files/move` | files.manage | `MoveFilesRequest` → 204 |
 | POST | `/api/files/delete` | files.delete | `BulkFilesRequest` → 204 |
 | DELETE | `/api/files/:id` | files.delete | → 204 |
@@ -78,6 +81,28 @@ All request/response types live in [`packages/shared/src/types.ts`](../packages/
 | GET | `/api/exports` | files.download | → `ExportJobDTO[]` (current user's recent exports) |
 | GET | `/api/exports/:id` | files.download | → `ExportJobDTO` (poll for `status: ready`) |
 | GET | `/api/exports/:id/download` | files.download | streams the ZIP |
+
+## Developer: API keys & webhooks
+
+Session-cookie admins only: an API key calling any `/api/developer/*` route gets 403.
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/api/developer/api-keys` | settings.view | → `ApiKeyDTO[]` (owners/admins see all keys, others their own; never the secret) |
+| POST | `/api/developer/api-keys` | settings.view | `CreateApiKeyRequest` → 201 `CreateApiKeyResponse` (`key` shown once; `write` needs files.manage in the creator's role) |
+| DELETE | `/api/developer/api-keys/:id` | settings.view | revoke → 204 (owners/admins any key, others only their own) |
+| GET | `/api/developer/webhooks` | settings.manage | → `WebhookDTO[]` |
+| POST | `/api/developer/webhooks` | settings.manage | `CreateWebhookRequest` → 201 `CreateWebhookResponse` (`whsec_…` secret shown once) |
+| PATCH | `/api/developer/webhooks/:id` | settings.manage | `UpdateWebhookRequest` → `WebhookDTO` (re-enabling resets the failure streak) |
+| DELETE | `/api/developer/webhooks/:id` | settings.manage | → 204 |
+| POST | `/api/developer/webhooks/:id/rotate-secret` | settings.manage | → `{ secret }` |
+| POST | `/api/developer/webhooks/:id/test` | settings.manage | queues a `webhook.test` delivery → 202 `WebhookDeliveryDTO` |
+| GET | `/api/developer/webhooks/:id/deliveries` | settings.manage | `?limit=50` (≤ 200) → `WebhookDeliveryDTO[]` |
+| POST | `/api/developer/webhooks/deliveries/:deliveryId/redeliver` | settings.manage | reset + re-queue → 202 `WebhookDeliveryDTO` |
+| GET | `/api/docs` | public | the developer guide (`text/markdown`) |
+| GET | `/api/public/files/:id/:exp/:sig/:name` | signed URL | `GET`/`HEAD`/`Range`; `?d=a` = attachment; 403 bad signature or quarantined, 410 expired |
+
+Webhooks are delivered by the `webhooks` queue (8 attempts, exponential backoff from 10 s), signed with `X-Scenox-Signature: t=<unix>,v1=<hex hmac-sha256(secret, "<t>.<body>")>`; deliveries to private addresses are refused unless `WEBHOOK_ALLOW_PRIVATE=true` (development). Events: `upload.completed`, `file.ready`, `file.quarantined`, `file.deleted`, `message.created`, `client.created`, `portal.created`.
 
 ## Activity, audit, notifications
 

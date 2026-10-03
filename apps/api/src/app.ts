@@ -14,6 +14,8 @@ import activityRoutes from './routes/activity';
 import authRoutes from './routes/auth';
 import clientRoutes from './routes/clients';
 import dashboardRoutes from './routes/dashboard';
+import developerRoutes from './routes/developer';
+import docsRoutes from './routes/docs';
 import fileRoutes from './routes/files';
 import healthRoutes from './routes/health';
 import messageRoutes from './routes/messages';
@@ -111,6 +113,8 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(activityRoutes); // /activity, /audit, /notifications
       await api.register(dashboardRoutes); // /dashboard, /analytics, /storage, /system
       await api.register(settingsRoutes, { prefix: '/settings' });
+      await api.register(developerRoutes, { prefix: '/developer' });
+      await api.register(docsRoutes); // GET /docs (public developer guide)
       await api.register(publicRoutes, { prefix: '/public' });
       await api.register(tusRoutes, { prefix: '/tus' });
     },

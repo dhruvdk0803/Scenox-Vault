@@ -151,6 +151,7 @@ Requirements: ports 80 and 443 reachable from the internet, DNS pointing at the 
 | `CLAMAV_ENABLED`, `CLAMAV_HOST`, `CLAMAV_PORT` | false, clamav, 3310 | |
 | `RATE_LIMIT_ENABLED` | true | |
 | `WORKER_CONCURRENCY` | 2 | |
+| `WEBHOOK_ALLOW_PRIVATE` | false | allow webhook deliveries to private/loopback addresses — development only (SSRF protection) |
 
 After editing `.env`: `docker compose up -d` (compose recreates only affected services).
 

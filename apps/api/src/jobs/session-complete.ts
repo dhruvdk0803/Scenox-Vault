@@ -2,6 +2,9 @@ import { formatBytes } from '@scenox/shared';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../db';
 import { clients, files, portals, uploadSessions } from '../db/schema';
+import { listSessionReadyFiles } from '../services/files';
+import { toUploadSessionDTO } from '../services/mappers';
+import { emitEvent } from '../services/webhooks';
 import { logger } from '../lib/logger';
 import { appLink, createEmailNotification, createInAppNotification, adminEmails } from '../services/notifications';
 import { getBranding, getSettings } from '../services/settings';
@@ -92,6 +95,19 @@ export async function processSessionComplete(sessionId: string, now = new Date()
     logger.error({ err, sessionId }, 'session-complete failed; releasing claim for retry');
     await db.update(uploadSessions).set({ notifiedAt: null }).where(eq(uploadSessions.id, sessionId));
     throw err;
+  }
+
+  // webhooks: upload.completed (never throws)
+  try {
+    const [fresh] = await db.select().from(uploadSessions).where(eq(uploadSessions.id, sessionId)).limit(1);
+    const ready = await listSessionReadyFiles(sessionId, 500);
+    await emitEvent(
+      'upload.completed',
+      { upload: toUploadSessionDTO(fresh ?? session, { clientName: client.name, portalName: portal.name }), files: ready.files, fileCount: ready.total },
+      { clientId: client.id },
+    );
+  } catch (err) {
+    logger.error({ err, sessionId }, 'failed to emit upload.completed webhook');
   }
   return 'done';
 }

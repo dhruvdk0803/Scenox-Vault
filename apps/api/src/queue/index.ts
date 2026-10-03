@@ -9,12 +9,14 @@ import { config } from '../config';
  *  notifications   : session-complete  — build + send "upload completed" emails / in-app notifications
  *                    send-notification — deliver one notifications row (email)
  *  exports         : build-zip         — stream selected files into a ZIP in STORAGE/exports
+ *  webhooks        : deliver-webhook   — POST one signed event to a customer webhook (8 attempts, exponential backoff)
  *  maintenance     : cleanup           — abandoned tus uploads, stale sessions, expired exports, retention, disk alerts
  */
 export const QUEUES = {
   fileProcessing: 'file-processing',
   notifications: 'notifications',
   exports: 'exports',
+  webhooks: 'webhooks',
   maintenance: 'maintenance',
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -24,6 +26,7 @@ export interface JobPayloads {
   'session-complete': { sessionId: string };
   'send-notification': { notificationId: string };
   'build-zip': { exportId: string };
+  'deliver-webhook': { deliveryId: string; force?: boolean };
   cleanup: Record<string, never>;
   'storage-check': Record<string, never>;
 }
@@ -34,6 +37,7 @@ const JOB_QUEUE: Record<JobName, QueueName> = {
   'session-complete': QUEUES.notifications,
   'send-notification': QUEUES.notifications,
   'build-zip': QUEUES.exports,
+  'deliver-webhook': QUEUES.webhooks,
   cleanup: QUEUES.maintenance,
   'storage-check': QUEUES.maintenance,
 };

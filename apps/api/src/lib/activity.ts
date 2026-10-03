@@ -47,11 +47,13 @@ export async function logActivity(input: ActivityInput): Promise<void> {
 
 /** Activity entry attributed to the signed-in admin making `req`. */
 export function audit(req: FastifyRequest, input: Omit<ActivityInput, 'actorType' | 'actorId' | 'actorLabel' | 'ip' | 'userAgent' | 'requestId'>) {
+  const key = req.apiKey;
   return logActivity({
     ...input,
+    metadata: key ? { ...input.metadata, apiKeyId: key.id } : input.metadata,
     actorType: req.user ? 'user' : 'system',
     actorId: req.user?.id ?? null,
-    actorLabel: req.user ? `${req.user.name} <${req.user.email}>` : null,
+    actorLabel: req.user ? (key ? `API key "${key.name}" (${req.user.name})` : `${req.user.name} <${req.user.email}>`) : null,
     ip: req.ip,
     userAgent: req.headers['user-agent'] ?? null,
     requestId: req.id,

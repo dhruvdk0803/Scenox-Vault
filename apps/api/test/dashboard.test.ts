@@ -173,7 +173,7 @@ describe('GET /api/system', () => {
       expect(checks.worker.status).toBe('ok');
       expect(s.status).toBe('ok');
     }
-    expect(s.queues.map((q: { name: string }) => q.name).sort()).toEqual(['exports', 'file-processing', 'maintenance', 'notifications']);
+    expect(s.queues.map((q: { name: string }) => q.name).sort()).toEqual(['exports', 'file-processing', 'maintenance', 'notifications', 'webhooks']);
     const viewer = await loginAs(app, 'viewer');
     expect((await get('/api/system', viewer.headers)).statusCode).toBe(403);
   });

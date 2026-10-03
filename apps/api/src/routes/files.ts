@@ -6,7 +6,23 @@ import { AppError, forbidden, notFound } from '../lib/errors';
 import { parse } from '../lib/validate';
 import type { FileRow } from '../db/schema';
 import { getStorage } from '../storage';
-import { browseFiles, browseQuerySchema, fileListQuerySchema, currentStorageKey, deleteFiles, getFileDTO, getFileRow, listFiles, moveFiles, renameFile } from '../services/files';
+import {
+  browseFiles,
+  browseQuerySchema,
+  bulkTagFiles,
+  bulkTagSchema,
+  currentStorageKey,
+  deleteFiles,
+  fileListQuerySchema,
+  getFileDTO,
+  getFileRow,
+  listFiles,
+  moveFiles,
+  renameFile,
+  updateFileSchema,
+  updateFileTagsAndMeta,
+} from '../services/files';
+import { buildSignedUrl, signedUrlSchema } from '../services/signed-urls';
 import { createExport, getExport, listExportsForUser, MAX_EXPORT_FILES } from '../services/exports';
 import { toExportDTO } from '../services/mappers';
 import { listFileComments, messageListQuerySchema } from '../services/messages';
@@ -79,19 +95,69 @@ export default async function filesRoutes(app: FastifyInstance) {
 
   app.patch('/files/:id', perm('files.manage'), async (req) => {
     const { id } = parse(idParam, req.params);
-    const { name } = parse(z.object({ name: z.string().trim().min(1, 'Please enter a file name.').max(1024) }), req.body ?? {});
-    const { before, after } = await renameFile(id, name);
-    if (before.originalFilename !== after.originalFilename) {
-      await audit(req, {
-        action: 'file.renamed',
-        resourceType: 'file',
-        resourceId: id,
-        clientId: after.clientId,
-        portalId: after.portalId,
-        metadata: { from: before.originalFilename, to: after.originalFilename },
-      });
+    const body = parse(updateFileSchema, req.body ?? {});
+    if (body.name !== undefined) {
+      const { before, after } = await renameFile(id, body.name);
+      if (before.originalFilename !== after.originalFilename) {
+        await audit(req, {
+          action: 'file.renamed',
+          resourceType: 'file',
+          resourceId: id,
+          clientId: after.clientId,
+          portalId: after.portalId,
+          metadata: { from: before.originalFilename, to: after.originalFilename },
+        });
+      }
+    }
+    if (body.tags !== undefined || body.addTags !== undefined || body.removeTags !== undefined || body.meta !== undefined) {
+      const { before, after } = await updateFileTagsAndMeta(id, body);
+      const tagsChanged = before.tags.join('\u0000') !== after.tags.join('\u0000');
+      if (tagsChanged || body.meta !== undefined) {
+        await audit(req, {
+          action: 'file.tagged',
+          resourceType: 'file',
+          resourceId: id,
+          clientId: after.clientId,
+          portalId: after.portalId,
+          metadata: {
+            name: after.originalFilename,
+            ...(tagsChanged ? { tags: after.tags, added: after.tags.filter((t) => !before.tags.includes(t)), removed: before.tags.filter((t) => !after.tags.includes(t)) } : {}),
+            ...(body.meta !== undefined ? { metaKeys: Object.keys(body.meta) } : {}),
+          },
+        });
+      }
     }
     return getFileDTO(id);
+  });
+
+  app.post('/files/tags', perm('files.manage'), async (req) => {
+    const body = parse(bulkTagSchema, req.body ?? {});
+    const res = await bulkTagFiles(body.fileIds, body);
+    await audit(req, {
+      action: 'file.tagged',
+      resourceType: 'file',
+      metadata: { count: res.updated, ...(body.addTags?.length ? { added: body.addTags } : {}), ...(body.removeTags?.length ? { removed: body.removeTags } : {}) },
+    });
+    return res;
+  });
+
+  // Public, time-limited download URL (e.g. for Shopify's originalSource). The URL itself is the credential.
+  app.post('/files/:id/signed-url', perm('files.download'), async (req) => {
+    const { id } = parse(idParam, req.params);
+    const { expiresIn, disposition } = parse(signedUrlSchema, req.body ?? {});
+    const f = await getFileRow(id);
+    if (f.status === 'quarantined') throw forbidden('This file is quarantined because it may contain a virus, so it can’t be shared.');
+    if (f.status !== 'ready') throw new AppError(409, 'file_not_ready', 'This file isn’t ready to download yet. Please try again in a moment.');
+    const res = buildSignedUrl(f, expiresIn, disposition);
+    await audit(req, {
+      action: 'file.signed_url_created',
+      resourceType: 'file',
+      resourceId: id,
+      clientId: f.clientId,
+      portalId: f.portalId,
+      metadata: { name: f.originalFilename, expiresIn, disposition },
+    });
+    return res;
   });
 
   app.delete('/files/:id', perm('files.delete'), async (req, reply) => {
@@ -165,7 +231,14 @@ export default async function filesRoutes(app: FastifyInstance) {
   });
 }
 
-export async function streamStoredFile(req: FastifyRequest, reply: FastifyReply, f: FileRow, key: string, wantInline: boolean, opts: { audit?: boolean } = {}) {
+export async function streamStoredFile(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  f: FileRow,
+  key: string,
+  wantInline: boolean,
+  opts: { audit?: boolean; cacheControl?: string } = {},
+) {
   const storage = getStorage();
   const meta = await storage.getMetadata(key);
   if (!meta) throw new AppError(410, 'file_missing', 'This file is no longer available on the server.');
@@ -184,7 +257,7 @@ export async function streamStoredFile(req: FastifyRequest, reply: FastifyReply,
     .header('content-disposition', contentDisposition(inline ? 'inline' : 'attachment', f.originalFilename))
     .header('accept-ranges', 'bytes')
     .header('x-content-type-options', 'nosniff')
-    .header('cache-control', 'private, no-store');
+    .header('cache-control', opts.cacheControl ?? 'private, no-store');
   if (inline) {
     reply.header('content-security-policy', sniffed === 'application/pdf' ? "default-src 'none'; frame-ancestors 'self'" : "default-src 'none'; media-src 'self'; img-src 'self'; frame-ancestors 'self'; sandbox");
   }

@@ -5,6 +5,7 @@ import { logger } from '../lib/logger';
 import { closeQueues, getQueue, getRedis, QUEUES, type JobName, type JobPayloads, type QueueName } from '../queue';
 import { buildExportZip } from '../services/exports';
 import { deliverNotification } from '../services/notifications';
+import { deliverWebhook } from '../services/webhooks';
 import { runCleanup } from './cleanup';
 import { markFileFailed, processFile } from './process-file';
 import { processSessionComplete, SESSION_COMPLETE_RETRY_MS } from './session-complete';
@@ -15,6 +16,7 @@ export { processSessionComplete } from './session-complete';
 export { runCleanup } from './cleanup';
 export { runStorageCheck } from './storage-check';
 export { buildExportZip } from '../services/exports';
+export { deliverWebhook } from '../services/webhooks';
 
 const CLEANUP_EVERY_MS = 15 * 60_000;
 const STORAGE_CHECK_EVERY_MS = 10 * 60_000;
@@ -34,6 +36,14 @@ const handlers: Record<JobName, Handler> = {
   },
   'send-notification': (job) => deliverNotification((job.data as JobPayloads['send-notification']).notificationId),
   'build-zip': (job) => buildExportZip((job.data as JobPayloads['build-zip']).exportId),
+  'deliver-webhook': async (job) => {
+    const { deliveryId, force } = job.data as JobPayloads['deliver-webhook'];
+    const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+    const result = await deliverWebhook(deliveryId, { finalAttempt, force });
+    // failed attempts are retried by BullMQ with exponential backoff; the delivery row records each attempt
+    if (result === 'retry') throw new Error('Webhook delivery failed; will retry.');
+    return result;
+  },
   cleanup: () => runCleanup(),
   'storage-check': () => runStorageCheck(),
 };
@@ -52,6 +62,7 @@ export async function startWorkers(): Promise<() => Promise<void>> {
     [QUEUES.fileProcessing, Math.max(1, cfg.workerConcurrency)],
     [QUEUES.notifications, Math.max(1, cfg.workerConcurrency)],
     [QUEUES.exports, 1],
+    [QUEUES.webhooks, Math.max(2, cfg.workerConcurrency * 2)],
     [QUEUES.maintenance, 1],
   ];
 

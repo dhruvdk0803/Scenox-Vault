@@ -15,7 +15,7 @@ import { config } from '../config';
 import { getDb } from '../db';
 import { files, uploadSessions } from '../db/schema';
 import { clientActivity } from '../lib/activity';
-import { AppError, forbidden, notFound, validationError } from '../lib/errors';
+import { AppError, forbidden, gone, notFound, validationError } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { enqueue } from '../queue';
 import { browseClientFiles, buildClientDashboard, clientBrowseQuerySchema, listClientUploads, loadUsablePortal } from '../services/client-portal';
@@ -40,6 +40,8 @@ import {
   validateIntake,
 } from '../services/public-portal';
 import { getQuota, quotaMessage } from '../services/quota';
+import { emitEvent } from '../services/webhooks';
+import { verifyFileSignature } from '../services/signed-urls';
 import { getBranding, getSettings } from '../services/settings';
 import { assertPortalUsable, authenticateUploadToken, checkFileRules, getUploadRules, hasPortalAccess, loadPortalByToken, requireUploadSession } from '../services/uploads';
 
@@ -324,6 +326,30 @@ export default async function publicRoutes(app: FastifyInstance) {
     return streamStoredFile(req, reply, f, key, true, { audit: false });
   });
 
+  // ───────────── signed file URLs (created via POST /api/files/:id/signed-url) ─────────────
+  // No cookies or headers needed, so external fetchers (Shopify, CDNs, scripts) can download. The signature
+  // binds file id + expiry + disposition; the last segment is cosmetic (keeps the file extension in the URL).
+  app.get('/files/:id/:exp/:sig/:name', async (req, reply) => {
+    const p = parse(z.object({ id: z.string().max(64), exp: z.string().max(20), sig: z.string().max(128), name: z.string().max(300) }), req.params);
+    const { d } = parse(z.object({ d: z.string().max(8).optional() }), req.query);
+    const disposition = d === 'a' ? 'attachment' : 'inline';
+    const exp = /^\d{1,12}$/.test(p.exp) ? Number(p.exp) : NaN;
+    if (!z.uuid().safeParse(p.id).success || !Number.isFinite(exp) || !verifyFileSignature(p.id, exp, disposition, p.sig)) {
+      throw forbidden('This link is not valid.');
+    }
+    const remaining = exp - Math.floor(Date.now() / 1000);
+    if (remaining <= 0) throw gone('This link has expired.', 'link_expired');
+    const [f] = await getDb().select().from(files).where(eq(files.id, p.id)).limit(1);
+    if (!f) throw notFound('File not found.');
+    if (f.status === 'quarantined') throw forbidden('This file is quarantined because it may contain a virus, so it can’t be downloaded.');
+    if (f.status !== 'ready') throw new AppError(409, 'file_not_ready', 'This file isn’t ready to download yet.');
+    const key = currentStorageKey(f);
+    if (!key) throw notFound('File not found.');
+    // the web app's default CORP is same-site; these links are meant to be embedded/fetched from anywhere
+    reply.header('cross-origin-resource-policy', 'cross-origin').header('x-robots-tag', 'noindex');
+    return streamStoredFile(req, reply, f, key, disposition === 'inline', { audit: false, cacheControl: `private, max-age=${remaining}` });
+  });
+
   // ───────────── client dashboard (no upload session needed) ─────────────
   app.get('/portals/:token/dashboard', limit(120), async (req) => {
     const { token } = parse(tokenParam, req.params);
@@ -377,6 +403,10 @@ export default async function publicRoutes(app: FastifyInstance) {
       metadata: { ...(body.fileId ? { fileId: body.fileId } : {}), length: body.body.length },
     });
     await notifyTeamOfClientMessage(portal, client, { authorName: created.authorName, body: body.body, fileName: created.fileName });
-    return reply.code(201).send(await getMessageDTO(created.id, true));
+    const dto = await getMessageDTO(created.id, true);
+    // webhooks see the staff view of the message (no `own` flag) plus names for routing; never throws
+    const { own: _own, ...messageData } = dto;
+    await emitEvent('message.created', { ...messageData, clientId: client.id, clientName: client.name, portalName: portal.name }, { clientId: client.id });
+    return reply.code(201).send(dto);
   });
 }

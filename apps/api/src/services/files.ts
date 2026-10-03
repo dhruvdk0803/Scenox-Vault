@@ -10,15 +10,16 @@ import {
   type FileStatus,
   type Paginated,
 } from '@scenox/shared';
-import { and, asc, desc, eq, gte, ilike, inArray, lte, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, ilike, inArray, lte, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { getDb } from '../db';
 import { clients, files, portals, uploadSessions, type FileRow } from '../db/schema';
-import { AppError, conflict, notFound } from '../lib/errors';
+import { AppError, conflict, notFound, validationError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import { KEYS, getStorage } from '../storage';
 import { toFileDTO } from './mappers';
 import { bumpCounters, type Tx } from './uploads';
+import { emitEvents } from './webhooks';
 
 /** Statuses whose bytes are counted in session/portal/client counters. */
 export const COUNTED_STATUSES: FileStatus[] = ['processing', 'ready', 'quarantined'];
@@ -91,6 +92,16 @@ export async function deleteFiles(ids: string[]): Promise<FileRow[]> {
     await removeStoredObjects(rows);
     deleted.push(...rows);
   }
+  // webhooks: only for files that had been visible (not abandoned/failed uploads). Never throws.
+  await emitEvents(
+    'file.deleted',
+    deleted
+      .filter((f) => COUNTED_STATUSES.includes(f.status))
+      .map((f) => ({
+        clientId: f.clientId,
+        data: { id: f.id, name: f.originalFilename, relativePath: f.relativePath, clientId: f.clientId, portalId: f.portalId, size: Number(f.size) },
+      })),
+  );
   return deleted;
 }
 
@@ -130,6 +141,111 @@ export async function uniqueName(
 
 // ───────────────────────── listing ─────────────────────────
 
+// ───────────────────────── tags & meta ─────────────────────────
+
+export const MAX_TAGS_PER_FILE = 20;
+export const MAX_META_BYTES = 16 * 1024;
+
+/** Normalised server-side: trimmed, lowercased, whitespace → "-"; then 1..50 chars of [a-z0-9:_-.] */
+export const tagSchema = z
+  .string('Tags must be text.')
+  .trim()
+  .toLowerCase()
+  .transform((v) => v.replace(/\s+/g, '-'))
+  .pipe(
+    z
+      .string()
+      .min(1, 'Tags cannot be empty.')
+      .max(50, 'Tags can be at most 50 characters.')
+      .regex(/^[a-z0-9:_\-.]+$/, 'Tags may only contain letters, numbers and : _ - .'),
+  );
+const tagList = z.array(tagSchema).max(MAX_TAGS_PER_FILE, `A file can have at most ${MAX_TAGS_PER_FILE} tags.`);
+
+const metaSchema = z
+  .record(z.string().min(1).max(100), z.unknown())
+  .refine((m) => !Object.keys(m).some((k) => k === '__proto__'), 'Invalid key.')
+  .refine((m) => Buffer.byteLength(JSON.stringify(m)) <= MAX_META_BYTES, `Metadata can be at most ${MAX_META_BYTES / 1024} KB.`);
+
+export const updateFileSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Please enter a file name.').max(1024).optional(),
+    tags: tagList.optional(),
+    addTags: tagList.optional(),
+    removeTags: tagList.optional(),
+    meta: metaSchema.optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Nothing to update.' });
+export type UpdateFileInput = z.infer<typeof updateFileSchema>;
+
+export const bulkTagSchema = z
+  .strictObject({
+    fileIds: z.array(z.uuid()).min(1, 'Select at least one file.').max(1000, 'Please send at most 1000 files at a time.'),
+    addTags: tagList.optional(),
+    removeTags: tagList.optional(),
+  })
+  .refine((v) => (v.addTags?.length ?? 0) + (v.removeTags?.length ?? 0) > 0, { message: 'Provide addTags and/or removeTags.' });
+
+/** tags (replace) → addTags → removeTags, de-duplicated, order preserved. */
+export function applyTagOps(current: string[], ops: { tags?: string[]; addTags?: string[]; removeTags?: string[] }): string[] {
+  let next = ops.tags ? [...new Set(ops.tags)] : [...current];
+  if (ops.addTags) next = [...new Set([...next, ...ops.addTags])];
+  if (ops.removeTags) {
+    const drop = new Set(ops.removeTags);
+    next = next.filter((t) => !drop.has(t));
+  }
+  if (next.length > MAX_TAGS_PER_FILE) {
+    throw validationError({ fields: { tags: `A file can have at most ${MAX_TAGS_PER_FILE} tags.` } }, `A file can have at most ${MAX_TAGS_PER_FILE} tags.`);
+  }
+  return next;
+}
+
+/** Shallow merge; a null value deletes the key. */
+export function mergeMeta(current: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete next[k];
+    else Object.defineProperty(next, k, { value: v, enumerable: true, writable: true, configurable: true });
+  }
+  if (Buffer.byteLength(JSON.stringify(next)) > MAX_META_BYTES) {
+    throw validationError({ fields: { meta: `Metadata can be at most ${MAX_META_BYTES / 1024} KB.` } }, `Metadata can be at most ${MAX_META_BYTES / 1024} KB.`);
+  }
+  return next;
+}
+
+/** Apply tag and/or meta changes to one file atomically (row lock, so concurrent updates don't lose writes). */
+export async function updateFileTagsAndMeta(
+  id: string,
+  input: Pick<UpdateFileInput, 'tags' | 'addTags' | 'removeTags' | 'meta'>,
+): Promise<{ before: FileRow; after: FileRow }> {
+  return getDb().transaction(async (tx) => {
+    const [before] = await tx.select().from(files).where(eq(files.id, id)).for('update').limit(1);
+    if (!before) throw notFound('File not found.');
+    const hasTags = input.tags !== undefined || input.addTags !== undefined || input.removeTags !== undefined;
+    const tags = hasTags ? applyTagOps(before.tags ?? [], input) : (before.tags ?? []);
+    const meta = input.meta ? mergeMeta(before.meta ?? {}, input.meta) : (before.meta ?? {});
+    if (!hasTags && !input.meta) return { before, after: before };
+    const [after] = await tx.update(files).set({ tags, meta, updatedAt: new Date() }).where(eq(files.id, id)).returning();
+    return { before, after: after! };
+  });
+}
+
+/** Add/remove tags on many files in one transaction. Returns how many of the given files exist (and were processed). */
+export async function bulkTagFiles(ids: string[], ops: { addTags?: string[]; removeTags?: string[] }): Promise<{ updated: number }> {
+  const unique = [...new Set(ids)];
+  return getDb().transaction(async (tx) => {
+    let updated = 0;
+    const rows = await tx.select({ id: files.id, tags: files.tags }).from(files).where(inArray(files.id, unique)).orderBy(asc(files.id)).for('update');
+    for (const r of rows) {
+      const next = applyTagOps(r.tags ?? [], ops);
+      updated++;
+      const cur = r.tags ?? [];
+      if (next.length === cur.length && next.every((t, i) => t === cur[i])) continue;
+      await tx.update(files).set({ tags: next, updatedAt: new Date() }).where(eq(files.id, r.id));
+    }
+    return { updated };
+  });
+}
+
 export const fileListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(1_000_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(25),
@@ -147,6 +263,14 @@ export const fileListQuerySchema = z.object({
   minSize: z.coerce.number().int().min(0).optional(),
   maxSize: z.coerce.number().int().min(0).optional(),
   path: z.string().max(4096).optional(),
+  tag: tagSchema.optional(),
+  notTag: tagSchema.optional(),
+  /** ISO date/time: only files completed (uploaded) after this instant — for incremental sync */
+  since: z
+    .string()
+    .max(40)
+    .refine((v) => !Number.isNaN(new Date(v).getTime()), 'Use an ISO date/time.')
+    .optional(),
 });
 
 const parseDate = (s: string | undefined, endOfDay = false): Date | undefined => {
@@ -203,6 +327,9 @@ export async function listFiles(raw: FileListQuery | z.input<typeof fileListQuer
   if (q.minSize !== undefined) conds.push(gte(files.size, q.minSize));
   if (q.maxSize !== undefined) conds.push(lte(files.size, q.maxSize));
   if (q.path !== undefined) conds.push(eq(files.relativePath, sanitizeRelativePath(q.path)));
+  if (q.tag) conds.push(sql`${files.tags} @> ARRAY[${q.tag}]::text[]`);
+  if (q.notTag) conds.push(sql`NOT (${files.tags} @> ARRAY[${q.notTag}]::text[])`);
+  if (q.since) conds.push(gt(files.completedAt, new Date(q.since)));
   if (q.q) {
     const pat = `%${escapeLike(q.q)}%`;
     conds.push(or(ilike(files.originalFilename, pat), ilike(files.relativePath, pat)));
@@ -216,6 +343,13 @@ export async function listFiles(raw: FileListQuery | z.input<typeof fileListQuer
     .limit(q.pageSize)
     .offset((q.page - 1) * q.pageSize);
   return { items: rows.map(rowToDTO), total: await countWhere(where), page: q.page, pageSize: q.pageSize };
+}
+
+/** Ready files of one upload session (oldest first) for the upload.completed webhook. */
+export async function listSessionReadyFiles(sessionId: string, limit: number): Promise<{ files: FileDTO[]; total: number }> {
+  const where = and(eq(files.uploadSessionId, sessionId), eq(files.status, 'ready'));
+  const rows = await joined().where(where).orderBy(asc(files.createdAt), asc(files.id)).limit(limit);
+  return { files: rows.map(rowToDTO), total: await countWhere(where) };
 }
 
 export async function getFileDTO(id: string): Promise<FileDTO> {

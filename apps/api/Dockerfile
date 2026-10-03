@@ -29,11 +29,13 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/api apps/api
+# served at GET /api/docs; tsup copies it into dist/ (see apps/api/tsup.config.ts)
+COPY docs/DEVELOPER_API.md docs/DEVELOPER_API.md
 RUN pnpm --filter @scenox/api build \
  # Self-contained production tree (prod deps only, incl. prebuilt @node-rs/argon2 binaries for glibc)
  && pnpm --filter @scenox/api deploy --legacy --prod /out \
  # deploy copies the package directory (incl. the freshly built dist/ and drizzle/ migrations); assert it
- && test -f /out/dist/server.js && test -f /out/dist/worker.js && test -f /out/drizzle/meta/_journal.json
+ && test -f /out/dist/server.js && test -f /out/dist/worker.js && test -f /out/dist/DEVELOPER_API.md && test -f /out/drizzle/meta/_journal.json
 
 # ───────────── runtime ─────────────
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime

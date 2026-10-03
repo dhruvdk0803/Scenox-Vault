@@ -10,6 +10,7 @@ import { logger } from '../lib/logger';
 import { parse } from '../lib/validate';
 import { getStorage, KEYS } from '../storage';
 import { toClientDTO } from './mappers';
+import { emitEvent } from './webhooks';
 import { emailSchema, escapeLike, nullableText, orderSchema, paginated, paginationSchema, positiveIntOrNull } from './validation';
 
 const optionalEmail = z
@@ -112,7 +113,9 @@ export async function createClient(req: FastifyRequest, body: unknown): Promise<
     })
     .returning();
   await audit(req, { action: 'client.created', resourceType: 'client', resourceId: row.id, clientId: row.id, metadata: { name: row.name } });
-  return toClientDTO(row, { portalCount: 0 });
+  const dto = toClientDTO(row, { portalCount: 0 });
+  await emitEvent('client.created', dto, { clientId: row.id });
+  return dto;
 }
 
 export async function updateClient(req: FastifyRequest, id: string, body: unknown): Promise<ClientDTO> {

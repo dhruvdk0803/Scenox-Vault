@@ -14,6 +14,7 @@ import { deleteFileObjects } from './clients';
 import { toPortalDTO } from './mappers';
 import { generatePortalToken } from './portal-tokens';
 import { getSettings } from './settings';
+import { emitEvent } from './webhooks';
 import { emailSchema, escapeLike, extensionList, nullableText, orderSchema, paginated, paginationSchema, positiveIntOrNull } from './validation';
 
 const isoDate = z.iso.datetime({ offset: true, message: 'Use an ISO date/time.' }).transform((v) => new Date(v));
@@ -166,7 +167,11 @@ export async function createPortal(req: FastifyRequest, body: unknown): Promise<
     portalId: row.id,
     metadata: { name: row.name, clientName: client.name, passwordProtected: !!row.passwordHash },
   });
-  return toPortalDTO(row, client.name);
+  const dto = toPortalDTO(row, client.name);
+  // the secret upload link must never leave the system through a webhook
+  const { url: _url, tokenPreview: _preview, ...safe } = dto;
+  await emitEvent('portal.created', safe, { clientId });
+  return dto;
 }
 
 export async function updatePortal(req: FastifyRequest, id: string, body: unknown): Promise<PortalDTO> {

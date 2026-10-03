@@ -8,6 +8,7 @@ import { enqueue, getQueue, QUEUES } from '../queue';
 import { purgeExpiredSessions } from '../services/auth';
 import { removeStoredObjects } from '../services/files';
 import { getSettings } from '../services/settings';
+import { purgeOldDeliveries } from '../services/webhooks';
 import { KEYS, getStorage } from '../storage';
 
 export const STALE_SESSION_MS = 6 * 3600_000;
@@ -35,6 +36,7 @@ export interface CleanupSummary {
   exportsExpired: number;
   activityPurged: number;
   processingRequeued: number;
+  webhookDeliveriesPurged: number;
 }
 
 /** Periodic housekeeping. Every step is independent: one failing step never blocks the others. */
@@ -51,6 +53,7 @@ export async function runCleanup(now = new Date()): Promise<CleanupSummary> {
     exportsExpired: 0,
     activityPurged: 0,
     processingRequeued: 0,
+    webhookDeliveriesPurged: 0,
   };
   const step = async (name: string, fn: () => Promise<void>) => {
     try {
@@ -164,6 +167,11 @@ export async function runCleanup(now = new Date()): Promise<CleanupSummary> {
       .where(and(eq(files.status, 'processing'), lt(files.completedAt, new Date(now.getTime() - STUCK_PROCESSING_MS))))
       .limit(500);
     for (const f of stuck) if (await requeueProcessFile(f.id)) summary.processingRequeued++;
+  });
+
+  // 8. webhook delivery history (30 days)
+  await step('webhook-deliveries', async () => {
+    summary.webhookDeliveriesPurged = await purgeOldDeliveries(now, 30);
   });
 
   logger.info({ ...summary }, 'cleanup finished');

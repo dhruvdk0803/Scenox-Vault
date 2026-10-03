@@ -20,6 +20,7 @@ export function redactUrl(url: string): string {
   return url
     .replace(/(\/public\/portals\/)[^/?#]+/, '$1[token]')
     .replace(/(\/u\/)[^/?#]+/, '$1[token]')
+    .replace(/(\/public\/files\/[^/?#]+\/[^/?#]+\/)[^/?#]+/, '$1[sig]')
     .replace(/([?&]access=)[^&#]+/, '$1[redacted]');
 }
 
