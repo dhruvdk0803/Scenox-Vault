@@ -251,6 +251,10 @@ export const files = pgTable(
     /** storage driver key, relative to the storage root. Never exposed to clients. */
     storageKey: text('storage_key'),
     clientKey: text('client_key'),
+    /** free-form labels set via the API/UI, e.g. "shopify" once a file was pushed to a store */
+    tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+    /** integration data set via the API (e.g. { shopifyProductId: "…" }); ≤ 16 KB */
+    meta: jsonb('meta').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
     lastModified: ts('last_modified'),
     avgSpeedBps: big('avg_speed_bps'),
     error: text('error'),
@@ -268,10 +272,74 @@ export const files = pgTable(
     index('files_checksum_idx').on(t.checksumSha256),
     index('files_client_path_idx').on(t.clientId, t.relativePath, t.originalFilename),
     index('files_name_trgm_idx').using('gin', t.originalFilename.op('gin_trgm_ops')),
+    index('files_tags_idx').using('gin', t.tags),
   ],
 );
 
 // ───────────────────────── exports (bulk zip) ─────────────────────────
+
+// ───────────────────────── developer API: keys & webhooks ─────────────────────────
+
+/** API keys: "svk_<random>" shown once; only an HMAC hash is stored. A key acts as its creator, limited to its scopes. */
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    prefix: text('prefix').notNull(), // first chars of the key, for display ("svk_AbC1…")
+    keyHash: text('key_hash').notNull(),
+    scopes: text('scopes').array().notNull(), // 'read' | 'write'
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    lastUsedAt: ts('last_used_at'),
+    lastUsedIp: inet('last_used_ip'),
+    expiresAt: ts('expires_at'),
+    revokedAt: ts('revoked_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('api_keys_hash_uq').on(t.keyHash), index('api_keys_user_idx').on(t.createdBy)],
+);
+
+export const webhooks = pgTable('webhooks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  url: text('url').notNull(),
+  events: text('events').array().notNull(), // see WEBHOOK_EVENTS; ['*'] = all
+  secretEncrypted: text('secret_encrypted').notNull(), // AES-GCM; used to sign deliveries
+  enabled: boolean('enabled').notNull().default(true),
+  /** optional filter: only events for this client */
+  clientId: uuid('client_id').references(() => clients.id, { onDelete: 'cascade' }),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  lastDeliveryAt: ts('last_delivery_at'),
+  lastStatus: integer('last_status'),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
+export const webhookDeliveryStatusEnum = pgEnum('webhook_delivery_status', ['pending', 'success', 'failed']);
+
+export const webhookDeliveries = pgTable(
+  'webhook_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    webhookId: uuid('webhook_id')
+      .notNull()
+      .references(() => webhooks.id, { onDelete: 'cascade' }),
+    event: text('event').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    status: webhookDeliveryStatusEnum('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    responseStatus: integer('response_status'),
+    responseBody: text('response_body'), // first 1 KB
+    error: text('error'),
+    durationMs: integer('duration_ms'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    deliveredAt: ts('delivered_at'),
+  },
+  (t) => [index('webhook_deliveries_hook_idx').on(t.webhookId, t.createdAt), index('webhook_deliveries_created_idx').on(t.createdAt)],
+);
 
 export const exportJobs = pgTable(
   'export_jobs',
@@ -397,3 +465,6 @@ export type ExportJob = typeof exportJobs.$inferSelect;
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
+export type ApiKeyRow = typeof apiKeys.$inferSelect;
+export type WebhookRow = typeof webhooks.$inferSelect;
+export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;

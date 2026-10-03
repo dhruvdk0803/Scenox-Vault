@@ -355,11 +355,16 @@ export interface FileDTO {
   duplicateOfId: string | null;
   uploaderName: string | null;
   uploaderEmail: string | null;
+  tags: string[];
+  meta: Record<string, unknown>;
   createdAt: string;
   completedAt: string | null;
 }
 
 export interface FileListQuery extends ListQuery {
+  tag?: string; // files having this tag
+  notTag?: string; // files NOT having this tag (e.g. notTag=shopify → not yet pushed)
+  since?: string; // ISO: completed (ready) after this instant — for incremental sync
   clientId?: string;
   portalId?: string;
   uploadSessionId?: string;
@@ -631,6 +636,119 @@ export interface InboxThreadDTO {
   lastMessage: MessageDTO;
   unread: number; // client messages not yet read by staff
   total: number;
+}
+
+// ───────────────────────── developer API ─────────────────────────
+
+export const API_KEY_SCOPES = ['read', 'write'] as const;
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
+
+export interface ApiKeyDTO {
+  id: string;
+  name: string;
+  prefix: string; // e.g. "svk_7Hq2"
+  scopes: ApiKeyScope[];
+  createdBy: { id: string; name: string } | null;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+export interface CreateApiKeyRequest {
+  name: string;
+  scopes: ApiKeyScope[];
+  expiresInDays?: number | null; // null/undefined = never
+}
+export interface CreateApiKeyResponse {
+  key: string; // full secret — shown ONCE
+  apiKey: ApiKeyDTO;
+}
+
+/** PATCH /api/files/:id also accepts these (write scope / files.manage) */
+export interface UpdateFileRequest {
+  name?: string;
+  tags?: string[]; // replace the whole set
+  addTags?: string[];
+  removeTags?: string[];
+  meta?: Record<string, unknown>; // shallow-merged; null values remove keys
+}
+/** POST /api/files/tags — bulk tag */
+export interface BulkTagRequest {
+  fileIds: string[];
+  addTags?: string[];
+  removeTags?: string[];
+}
+
+/** POST /api/files/:id/signed-url → a public, time-limited URL (e.g. for Shopify originalSource) */
+export interface SignedUrlRequest {
+  expiresIn?: number; // seconds, 60..604800, default 3600
+  disposition?: 'inline' | 'attachment';
+}
+export interface SignedUrlResponse {
+  url: string;
+  expiresAt: string;
+}
+
+export const WEBHOOK_EVENTS = [
+  'upload.completed', // a client finished an upload batch (fires after its files are processed)
+  'file.ready', // a file finished processing (checksum/scan) and can be downloaded
+  'file.quarantined',
+  'file.deleted',
+  'message.created', // a client sent a message or file comment
+  'client.created',
+  'portal.created',
+] as const;
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+export interface WebhookDTO {
+  id: string;
+  name: string;
+  url: string;
+  events: (WebhookEvent | '*')[];
+  clientId: string | null;
+  clientName: string | null;
+  enabled: boolean;
+  lastDeliveryAt: string | null;
+  lastStatus: number | null;
+  consecutiveFailures: number;
+  createdAt: string;
+}
+export interface CreateWebhookRequest {
+  name: string;
+  url: string; // https:// (http only for localhost in development)
+  events: (WebhookEvent | '*')[];
+  clientId?: string | null;
+}
+export type UpdateWebhookRequest = Partial<CreateWebhookRequest> & { enabled?: boolean };
+export interface CreateWebhookResponse {
+  webhook: WebhookDTO;
+  secret: string; // signing secret — shown ONCE ("whsec_…")
+}
+export interface WebhookDeliveryDTO {
+  id: string;
+  event: string;
+  status: 'pending' | 'success' | 'failed';
+  attempts: number;
+  responseStatus: number | null;
+  responseBody: string | null;
+  error: string | null;
+  durationMs: number | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  deliveredAt: string | null;
+}
+
+/**
+ * Webhook POST body. Headers:
+ *   X-Scenox-Event: <event>
+ *   X-Scenox-Delivery: <delivery id>
+ *   X-Scenox-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, `${t}.${rawBody}`)>
+ */
+export interface WebhookPayload<T = unknown> {
+  id: string; // delivery id
+  event: WebhookEvent | 'webhook.test';
+  createdAt: string;
+  data: T; // file.* → FileDTO; upload.completed → { upload: UploadSessionDTO, files: FileDTO[] (≤ 500), fileCount }; message.created → MessageDTO & { clientId, clientName, portalName }; client.created → ClientDTO; portal.created → PortalDTO (url omitted)
 }
 
 export type { DuplicateAction };

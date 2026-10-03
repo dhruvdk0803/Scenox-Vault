@@ -116,6 +116,8 @@ export function toFileDTO(
     duplicateOfId: f.duplicateOfId,
     uploaderName: extra.uploaderName ?? null,
     uploaderEmail: extra.uploaderEmail ?? null,
+    tags: f.tags ?? [],
+    meta: f.meta ?? {},
     createdAt: f.createdAt.toISOString(),
     completedAt: iso(f.completedAt),
   };
