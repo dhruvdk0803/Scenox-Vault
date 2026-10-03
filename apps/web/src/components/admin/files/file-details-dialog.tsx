@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Download, MessageSquare } from 'lucide-react';
+import { Download, Link2, MessageSquare } from 'lucide-react';
 import { formatBytes, type FileDTO } from '@scenox/shared';
 import { api } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -16,6 +16,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { MessageThread } from '../messages/message-thread';
 import { ErrorState } from '../query-state';
 import { formatDateTime } from '../relative-time';
+import { FileTagsEditor, IntegrationData, ShareLinkDialog } from './file-tags';
 import { downloadUrl, FileTypeIcon, filePath } from './file-utils';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -32,6 +33,8 @@ export function FileDetailsDialog({ fileId, onOpenChange, initial }: { fileId: s
   const [currentId, setCurrentId] = React.useState<string | null>(fileId);
   React.useEffect(() => setCurrentId(fileId), [fileId]);
   const canDownload = usePermission('files.download');
+  const [shareOpen, setShareOpen] = React.useState(false);
+  React.useEffect(() => setShareOpen(false), [fileId]);
 
   const { data: file, isPending, error, refetch, isFetching } = useQuery({
     queryKey: queryKeys.files.detail(currentId ?? ''),
@@ -114,12 +117,19 @@ export function FileDetailsDialog({ fileId, onOpenChange, initial }: { fileId: s
                 </Row>
               )}
             </dl>
+            <FileTagsEditor file={file} />
+            <IntegrationData meta={file.meta} />
             <section aria-labelledby="file-comments-heading">
               <h3 id="file-comments-heading" className="mb-2 flex items-center gap-2 text-sm font-semibold text-fg"><MessageSquare className="size-4 text-fg-subtle" aria-hidden /> Comments</h3>
               <MessageThread portalId={file.portalId} fileId={file.id} compact className="h-72 overflow-hidden rounded-lg border border-border" />
             </section>
             <div className="flex flex-wrap justify-end gap-2">
               <CopyButton value={filePath(file)} label="Copy path" showLabel variant="outline" />
+              {canDownload && file.status === 'ready' && (
+                <Button size="sm" variant="outline" onClick={() => setShareOpen(true)}>
+                  <Link2 aria-hidden /> Copy share link
+                </Button>
+              )}
               {canDownload && (
                 file.status === 'quarantined' ? (
                   <Button size="sm" disabled>
@@ -134,6 +144,7 @@ export function FileDetailsDialog({ fileId, onOpenChange, initial }: { fileId: s
                 )
               )}
             </div>
+            <ShareLinkDialog file={shareOpen ? file : null} onOpenChange={(o) => !o && setShareOpen(false)} />
           </>
         )}
       </DialogContent>

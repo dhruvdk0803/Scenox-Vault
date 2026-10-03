@@ -20,6 +20,7 @@ import { ExportsTray } from './exports-tray';
 import { FileBrowser } from './file-browser';
 import { FileBulkBar } from './file-bulk-bar';
 import { FileTable } from './file-table';
+import { TagFilter } from './file-tags';
 import { FILE_STATUS_OPTIONS, FILE_TYPE_OPTIONS } from './file-utils';
 
 const DATE_PRESETS = [
@@ -37,7 +38,7 @@ const SIZE_PRESETS = [
   { value: String(1e10), label: '≥ 10 GB' },
 ];
 
-type Filters = { clientId?: string; portalId?: string; type?: string; status?: string; date?: string; minSize?: string };
+type Filters = { clientId?: string; portalId?: string; type?: string; status?: string; date?: string; minSize?: string; tag?: string; tagMode?: string };
 
 function AllFiles() {
   const ls = useListState<Filters>({ pageSize: 50, sort: { key: 'createdAt', order: 'desc' } });
@@ -56,6 +57,8 @@ function AllFiles() {
     status: filters.status,
     from: filters.date ? startOfDay(subDays(new Date(), Number(filters.date) - 1)).toISOString() : undefined,
     minSize: filters.minSize,
+    tag: filters.tagMode === 'not' ? undefined : filters.tag,
+    notTag: filters.tagMode === 'not' ? filters.tag : undefined,
   };
   const { data, isPending, error, refetch, isFetching } = useQuery({
     queryKey: queryKeys.files.list(params),
@@ -63,7 +66,7 @@ function AllFiles() {
     placeholderData: keepPreviousData,
   });
   const fetchMatching = (pg: number, pageSize: number) => api.get<Paginated<FileDTO>>(`/files${qs({ ...params, page: pg, pageSize })}`);
-  const hasFilter = !!(ls.q || filters.clientId || filters.portalId || filters.type || filters.status || filters.date || filters.minSize);
+  const hasFilter = !!(ls.q || filters.clientId || filters.portalId || filters.type || filters.status || filters.date || filters.minSize || filters.tag);
 
   return (
     <div className="space-y-4">
@@ -77,6 +80,11 @@ function AllFiles() {
         <SimpleSelect aria-label="Status" className="w-36" value={filters.status ?? ALL} onValueChange={(v) => ls.setFilter('status', fromSelect(v))} options={[{ value: ALL, label: 'Any status' }, ...FILE_STATUS_OPTIONS]} />
         <SimpleSelect aria-label="Uploaded" className="w-36" value={filters.date ?? ALL} onValueChange={(v) => ls.setFilter('date', fromSelect(v))} options={DATE_PRESETS} />
         <SimpleSelect aria-label="Minimum size" className="w-32" value={filters.minSize ?? ALL} onValueChange={(v) => ls.setFilter('minSize', fromSelect(v))} options={SIZE_PRESETS} />
+        <TagFilter
+          tag={filters.tag}
+          mode={filters.tagMode === 'not' ? 'not' : 'has'}
+          onChange={(tag, mode) => { ls.setFilter('tag', tag); ls.setFilter('tagMode', tag && mode === 'not' ? 'not' : undefined); setSelected(new Set()); }}
+        />
         <ExportsTray />
       </FilterBar>
 

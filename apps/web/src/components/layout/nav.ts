@@ -1,5 +1,5 @@
 import {
-  Activity, FolderOpen, HardDrive, HeartPulse, LayoutDashboard, Link2, MessagesSquare, ScrollText, Settings, UploadCloud, Users, UserCog,
+  Activity, Code2, FolderOpen, HardDrive, HeartPulse, LayoutDashboard, Link2, MessagesSquare, ScrollText, Settings, UploadCloud, Users, UserCog,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permission } from '@scenox/shared';
@@ -28,6 +28,7 @@ export const PRIMARY_NAV: NavItem[] = [
 
 export const SECONDARY_NAV: NavItem[] = [
   { label: 'Team', href: '/team', icon: UserCog, permission: 'team.view' },
+  { label: 'Developers', href: '/developers', icon: Code2, permission: 'settings.view' },
   { label: 'Audit Log', href: '/audit', icon: ScrollText, permission: 'audit.view' },
   { label: 'System Health', href: '/system', icon: HeartPulse, permission: 'system.view' },
 ];

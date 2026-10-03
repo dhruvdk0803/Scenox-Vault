@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Download, Eye, FolderInput, Info, MoreHorizontal, Pencil, Trash2, ClipboardCopy } from 'lucide-react';
+import { Download, Eye, FolderInput, Info, Link2, MoreHorizontal, Pencil, Trash2, ClipboardCopy } from 'lucide-react';
 import { formatBytes, type FileDTO } from '@scenox/shared';
 import { api, errorMessage } from '@/lib/api';
 import { usePermission } from '@/lib/hooks/use-me';
@@ -14,6 +14,7 @@ import { toast } from '@/components/ui/toaster';
 import { RelativeTime } from '../relative-time';
 import { FileDetailsDialog } from './file-details-dialog';
 import { FilePreview } from './file-preview';
+import { ShareLinkDialog, TagList } from './file-tags';
 import { MoveFilesDialog, RenameFileDialog, useInvalidateFiles } from './file-dialogs';
 import { downloadUrl, FileTypeIcon, filePath } from './file-utils';
 
@@ -44,6 +45,7 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
   const [moveFile, setMoveFile] = React.useState<FileDTO | null>(null);
   const [deleteFile, setDeleteFile] = React.useState<FileDTO | null>(null);
   const [previewId, setPreviewId] = React.useState<string | null>(null);
+  const [shareFile, setShareFile] = React.useState<FileDTO | null>(null);
 
   const openDetails = (f: FileDTO) => {
     setDetailInitial(f);
@@ -77,6 +79,7 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
               {f.name}
             </button>
             {f.relativePath && <p className="truncate text-xs text-fg-subtle" title={f.relativePath}>{f.relativePath}</p>}
+            <TagList tags={f.tags} />
           </div>
         </div>
       ),
@@ -138,6 +141,7 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onSelect={() => void copyPath(f)}><ClipboardCopy aria-hidden /> Copy path</DropdownMenuItem>
+            {canDownload && f.status === 'ready' && <DropdownMenuItem onSelect={() => setShareFile(f)}><Link2 aria-hidden /> Copy share link</DropdownMenuItem>}
             {canManage && (
               <>
                 <DropdownMenuSeparator />
@@ -176,6 +180,7 @@ export function FileTable({ files, loading, empty, selectedIds, onSelectionChang
       />
       <FilePreview files={files} fileId={previewId} onFileChange={setPreviewId} onClose={closePreview} onOpenDetails={openDetails} />
       <FileDetailsDialog fileId={detailId} initial={detailInitial} onOpenChange={(o) => !o && setDetailId(null)} />
+      <ShareLinkDialog file={shareFile} onOpenChange={(o) => !o && setShareFile(null)} />
       <RenameFileDialog file={renameFile} onOpenChange={(o) => !o && setRenameFile(null)} />
       <MoveFilesDialog open={!!moveFile} onOpenChange={(o) => !o && setMoveFile(null)} fileIds={moveFile ? [moveFile.id] : []} initialPath={moveFile?.relativePath} />
       <ConfirmDialog

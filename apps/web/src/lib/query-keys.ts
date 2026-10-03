@@ -48,4 +48,10 @@ export const queryKeys = {
   system: ['system'] as const,
   settings: ['settings'] as const,
   users: ['users'] as const,
+  developer: {
+    apiKeys: ['developer', 'api-keys'] as const,
+    webhooks: ['developer', 'webhooks'] as const,
+    deliveries: (webhookId: string) => ['developer', 'webhooks', webhookId, 'deliveries'] as const,
+    docs: ['developer', 'docs'] as const,
+  },
 };

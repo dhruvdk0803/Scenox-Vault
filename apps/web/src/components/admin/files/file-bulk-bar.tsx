@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Download, FolderInput, ListChecks, Trash2, X } from 'lucide-react';
+import { Download, FolderInput, ListChecks, Tag, Tags, Trash2, X } from 'lucide-react';
 import { formatBytes, formatNumber, type ExportJobDTO, type FileDTO } from '@scenox/shared';
 import { api, errorMessage } from '@/lib/api';
 import { queryKeys } from '@/lib/query-keys';
@@ -13,6 +13,7 @@ import { toast } from '@/components/ui/toaster';
 import { collectFiles, deleteFileIds, type PageFetcher } from './bulk-delete';
 import { openExportsTray } from './exports-tray';
 import { MoveFilesDialog, useInvalidateFiles } from './file-dialogs';
+import { BulkTagDialog } from './file-tags';
 import { downloadUrl } from './file-utils';
 
 export interface FileBulkBarProps {
@@ -38,6 +39,7 @@ export function FileBulkBar({ selectedIds, onClear, onSelectionChange, initialMo
   const invalidate = useInvalidateFiles();
   const [moveOpen, setMoveOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [tagMode, setTagMode] = React.useState<'add' | 'remove' | null>(null);
   const [exporting, setExporting] = React.useState(false);
   const [selecting, setSelecting] = React.useState<{ found: number; total: number } | null>(null);
   const [progress, setProgress] = React.useState<{ done: number; total: number } | null>(null);
@@ -60,6 +62,13 @@ export function FileBulkBar({ selectedIds, onClear, onSelectionChange, initialMo
   React.useEffect(() => {
     if (!deleteOpen) setProgress(null);
   }, [deleteOpen]);
+
+  // Tags seen on the listed rows that are selected, offered as quick picks when removing.
+  const knownTags = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const f of files ?? []) if (selectedIds.has(f.id)) for (const t of f.tags ?? []) set.add(t);
+    return Array.from(set).sort();
+  }, [files, selectedIds]);
 
   if (n === 0) return null;
 
@@ -140,6 +149,16 @@ export function FileBulkBar({ selectedIds, onClear, onSelectionChange, initialMo
             <FolderInput aria-hidden /> Move
           </Button>
         )}
+        {canManage && (
+          <>
+            <Button size="sm" variant="outline" onClick={() => setTagMode('add')} disabled={!!selecting}>
+              <Tag aria-hidden /> Add tag…
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setTagMode('remove')} disabled={!!selecting}>
+              <Tags aria-hidden /> Remove tag…
+            </Button>
+          </>
+        )}
         {canDelete && (
           <Button size="sm" variant="outline" className="text-danger hover:text-danger" onClick={() => setDeleteOpen(true)} disabled={!!selecting}>
             <Trash2 aria-hidden /> Delete
@@ -149,6 +168,7 @@ export function FileBulkBar({ selectedIds, onClear, onSelectionChange, initialMo
           <X aria-hidden /> Clear
         </Button>
       </div>
+      <BulkTagDialog mode={tagMode} fileIds={ids} suggestions={knownTags} onOpenChange={(o) => !o && setTagMode(null)} />
       <MoveFilesDialog open={moveOpen} onOpenChange={setMoveOpen} fileIds={ids} initialPath={initialMovePath} onMoved={onClear} />
       <ConfirmDialog
         open={deleteOpen}
